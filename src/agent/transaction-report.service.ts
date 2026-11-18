@@ -2,8 +2,10 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import { Document } from 'mongodb';
 import { env } from '../config/env';
 import { MongoService } from '../database/mongo.service';
+import { salesTransactionsPipeline } from './sales-transactions.pipeline';
 
 export type TransactionReportType =
+  | 'sales'
   | 'authorization_sales'
   | 'sales_non_cash'
   | 'online_marketplace_price'
@@ -56,9 +58,10 @@ export class TransactionReportService {
 
         const pipeline = buildPipeline(reportType, range, marketplace, paymentMethod);
         pipeline.push({ $limit: MAX_REPORT_ROWS + 1 });
-        const rawRows = await db.collection(collectionName)
+        const aggregateRows = await db.collection(collectionName)
           .aggregate<Document>(pipeline, { allowDiskUse: true, maxTimeMS: MAX_QUERY_TIME_MS })
           .toArray();
+        const rawRows: Document[] = reportType === 'sales' ? aggregateRows[0]?.rows ?? [] : aggregateRows;
         const truncated = rawRows.length > MAX_REPORT_ROWS;
         const visibleRows = rawRows.slice(0, MAX_REPORT_ROWS).map((row) => normalizeReportRow(reportType, row));
         return {
@@ -69,6 +72,7 @@ export class TransactionReportService {
           rows: visibleRows,
           rowCount: visibleRows.length,
           truncated,
+          ...(reportType === 'sales' ? { totals: aggregateRows[0]?.totals?.[0] ?? { invoiceCount: 0, detailCount: 0, salesAmountIdr: 0, weightGram: 0 } } : {}),
         };
       } catch {
         return {
@@ -110,6 +114,7 @@ function buildPipeline(
   marketplace?: string,
   paymentMethod?: NonCashPaymentMethod,
 ): Document[] {
+  if (reportType === 'sales') return salesTransactionsPipeline(range, MAX_REPORT_ROWS + 1);
   if (reportType === 'authorization_sales') return buildAuthorizationPipeline(range);
   if (reportType === 'sales_non_cash') return buildSalesNonCashPipeline(range, paymentMethod);
   if (reportType === 'online_marketplace_price') return buildOnlineMarketplacePipeline(range, marketplace);
@@ -497,6 +502,11 @@ function buildPurchaseDamagedConditionPipeline(range: { from: string; to: string
 }
 
 function normalizeReportRow(reportType: TransactionReportType, row: Document): Document {
+  if (reportType === 'sales') return {
+    ...row,
+    input_by: typeof row.input_by === 'string' ? decryptLegacyAscii(row.input_by) : row.input_by,
+    nama_barang: typeof row.nama_barang === 'string' ? decryptLegacyAscii(row.nama_barang) : row.nama_barang,
+  };
   if (reportType === 'online_marketplace_price') return normalizeMarketplaceRow(row);
   if (reportType === 'authorization_sales' || reportType === 'sales_non_cash' || reportType === 'purchase_damaged_condition') {
     if (typeof row.input_by === 'string') return { ...row, input_by: decryptLegacyAscii(row.input_by) };
@@ -572,6 +582,7 @@ function isRecord(value: unknown): value is UnknownRecord {
 }
 
 function reportPolicy(reportType: TransactionReportType, paymentMethod?: NonCashPaymentMethod): string {
+  if (reportType === 'sales') return 'Penjualan Pusat dan cabang yang diizinkan; status_valid=DONE, status_kembali=OPEN, transaksi tukar dikecualikan. Total mencakup seluruh hasil filter, bukan hanya rincian yang ditampilkan.';
   if (reportType === 'authorization_sales') return 'kategori=PENJUALAN; tt_authorization tidak memiliki status_valid.';
   if (reportType === 'sales_non_cash') return `tt_jual_detail status_valid=DONE/status_kembali=OPEN dihubungkan ke tt_cash_daily melalui no_faktur_group=deskripsi; status pembayaran OPEN, kategori PENJUALAN, metode ${paymentMethod ?? 'DEBET/CREDIT/TRANSFER'}, nominal sudah mengikuti perhitungan fee backend. Jika module transfer lebih membuat kategori KEMBALI TRANSFER, jumlah_out ditampilkan sebagai lebih bayar transfer.`;
   if (reportType === 'online_marketplace_price') return 'tt_jual_detail: status_valid=DONE, status_kembali=OPEN; dikelompokkan berdasarkan no_faktur_group_user dan item packing/plastik bening ikut dihitung.';
@@ -580,6 +591,7 @@ function reportPolicy(reportType: TransactionReportType, paymentMethod?: NonCash
 }
 
 function reportTitle(reportType: TransactionReportType, paymentMethod?: NonCashPaymentMethod): string {
+  if (reportType === 'sales') return 'Transaksi Penjualan';
   if (reportType === 'authorization_sales') return 'Rincian Otorisasi Penjualan';
   if (reportType === 'sales_non_cash') return paymentMethod ? `Penjualan ${paymentMethod}` : 'Laporan Penjualan Non-Cash';
   if (reportType === 'online_marketplace_price') return 'Harga Online Marketplace';
@@ -595,7 +607,7 @@ function collectionFor(reportType: TransactionReportType): string {
 }
 
 function parseReportType(value: unknown): TransactionReportType {
-  const allowed: TransactionReportType[] = ['authorization_sales', 'sales_non_cash', 'online_marketplace_price', 'purchase_damaged_condition', 'login_activity'];
+  const allowed: TransactionReportType[] = ['sales', 'authorization_sales', 'sales_non_cash', 'online_marketplace_price', 'purchase_damaged_condition', 'login_activity'];
   if (typeof value !== 'string' || !allowed.includes(value as TransactionReportType)) throw new BadRequestException('Jenis laporan transaksi tidak valid.');
   return value as TransactionReportType;
 }

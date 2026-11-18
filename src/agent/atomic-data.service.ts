@@ -49,7 +49,7 @@ export class AtomicDataService {
     if (args.shipmentStatus !== undefined && !['OPEN', 'CLOS', 'all'].includes(args.shipmentStatus)) throw new BadRequestException('Status pengiriman tidak valid.');
     if (kind === 'stock' && (args.from || args.to)) throw new BadRequestException('Stok membaca posisi saat ini; jangan kirim from/to.');
     if (kind !== 'stock') atomicRange(args);
-    const eligible = allowed.filter(source => (kind === 'stock' || source.sourceType === 'branch') && (!args.sourceType || source.sourceType === args.sourceType));
+    const eligible = allowed.filter(source => (kind === 'stock' || kind === 'sales' || source.sourceType === 'branch') && (!args.sourceType || source.sourceType === args.sourceType));
     if (args.branchIds?.some(id => !eligible.some(source => source.branchId === id))) throw new BadRequestException('ID sumber tidak tersedia atau tidak diizinkan untuk fungsi ini.');
     const selected = eligible.filter(source => !args.branchIds || args.branchIds.includes(source.branchId));
     if (!selected.length) throw new BadRequestException('Tidak ada sumber aktif yang diizinkan.');

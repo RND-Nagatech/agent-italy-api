@@ -21,6 +21,7 @@
     "test:agent-skills": "npm run build && node scripts/check-agent-skills.cjs",
     "test:restock:weekly": "npm run build && node scripts/check-weekly-restock.cjs",
     "test:sales:branches": "npm run build && node dist/scripts/check-branch-sales.js",
+    "test:sales:italy": "npm run build && node scripts/check-italy-sales.cjs",
     "test:restock:offer": "npm run build && node scripts/check-offered-stock.cjs",
     "test:stock-baselines": "npm run build && node scripts/check-stock-baselines.cjs && node --experimental-strip-types scripts/check-baseline-csv.mjs",
     "test:distribution-priority": "npm run build && node scripts/check-distribution-priority.cjs"

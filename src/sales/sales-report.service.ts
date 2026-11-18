@@ -71,10 +71,12 @@ export class SalesReportService {
 
     const sourceFilter: Document = {
       active: true,
-      sourceType: { $ne: 'central' },
       databaseName: { $nin: [...RESERVED_DATABASES, env.systemDatabaseName] },
     };
-    if (branchScope) sourceFilter.branchId = branchScope;
+    if (branchScope) {
+      sourceFilter.branchId = branchScope;
+      sourceFilter.sourceType = { $ne: 'central' };
+    }
     else if (branchId) sourceFilter.branchId = branchId;
 
     const sources = await this.mongo.db.collection<AgentDataSourceConfig>('shipment_sources')
@@ -85,10 +87,10 @@ export class SalesReportService {
 
     if (!sources.length) {
       if (branchScope) throw new ForbiddenException('No active data source configured for this branch');
-      throw new SalesReportError('Tidak ada sumber cabang aktif yang cocok dengan filter laporan.');
+      throw new SalesReportError('Tidak ada sumber toko aktif yang cocok dengan filter laporan.');
     }
 
-    const key = `agent:sales-period-report:v1:${JSON.stringify({
+    const key = `agent:sales-period-report:v2:${JSON.stringify({
       from: range.from,
       to: range.to,
       branchScope,
@@ -96,7 +98,7 @@ export class SalesReportService {
       jenisCode: jenisCode ?? null,
       sources: sources.map(({ databaseName, alias, branchId: id }) => ({ databaseName, alias, branchId: id })),
     })}`;
-    if (refresh) this.cache.clearByPrefix('agent:sales-period-report:v1:');
+    if (refresh) this.cache.clearByPrefix('agent:sales-period-report:v2:');
 
     return this.cache.getOrLoad(key, () => this.loadReport(sources, range, jenisCode));
   }

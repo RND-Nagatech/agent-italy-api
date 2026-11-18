@@ -51,7 +51,7 @@ export class BranchSalesService {
     if (input.includeJenis !== undefined && typeof input.includeJenis !== 'boolean') throw new BadRequestException('includeJenis harus boolean.');
     if (!bySales && input.salesCode !== undefined) throw new BadRequestException('Filter salesCode tersedia pada laporan per sales.');
     const args = { ...input, jenisCode: input.jenisCode?.trim(), salesCode: input.salesCode?.trim(), includeJenis: input.includeJenis ?? bySales, page: positiveInteger(input.page, 1, 100000, 'page'), pageSize: positiveInteger(input.pageSize, 10, 20, 'pageSize'), jenisPage: positiveInteger(input.jenisPage, 1, 100000, 'jenisPage'), jenisPageSize: positiveInteger(input.jenisPageSize, 10, 20, 'jenisPageSize') };
-    const branches = allowed.filter(source => source.sourceType === 'branch');
+    const branches = allowed;
     if (input.branchIds !== undefined && (!Array.isArray(input.branchIds) || !input.branchIds.length || input.branchIds.length > 100 || input.branchIds.some(id => typeof id !== 'string' || !branches.some(source => source.branchId === id)))) throw new BadRequestException('branchIds tidak tersedia atau tidak diizinkan.');
     const selected = branches.filter(source => !input.branchIds || input.branchIds.includes(source.branchId));
     if (!selected.length || selected.length > 100) throw new BadRequestException('Tidak ada cabang yang diizinkan atau jumlah cabang melewati batas.');

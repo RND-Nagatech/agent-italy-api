@@ -11,6 +11,7 @@ const NON_CASH_METHOD_LABELS: Record<NonCashMethod, string> = {
 };
 
 const REPORT_TYPE_LABELS: Record<string, string> = {
+  sales: 'Transaksi Penjualan',
   authorization_sales: 'Rincian Otorisasi Penjualan',
   sales_non_cash: 'Laporan Penjualan Non-Cash',
   online_marketplace_price: 'Harga Online Marketplace',
@@ -47,7 +48,9 @@ export function transactionReportBlocks(result: UnknownRecord): AgentResponseBlo
     return blocks;
   }
 
-  if (reportType === 'purchase_damaged_condition') {
+  if (reportType === 'sales') {
+    addSalesBlocks(blocks, availableSources);
+  } else if (reportType === 'purchase_damaged_condition') {
     addPurchaseBlocks(blocks, availableSources);
   } else if (reportType === 'authorization_sales') {
     addAuthorizationBlocks(blocks, availableSources);
@@ -68,6 +71,21 @@ export function transactionReportBlocks(result: UnknownRecord): AgentResponseBlo
     });
   }
   return blocks;
+}
+
+function addSalesBlocks(blocks: AgentResponseBlock[], sources: UnknownRecord[]) {
+  const sourceTotal = (source: UnknownRecord) => isRecord(source.totals) ? numberValue(source.totals.salesAmountIdr) : 0;
+  blocks.push(metric('Total penjualan', sources.reduce((sum, source) => sum + sourceTotal(source), 0), 'IDR', 'navy'));
+  for (const source of sources) blocks.push(metric(`Penjualan ${sourceLabel(source)}`, sourceTotal(source), 'IDR', 'teal'));
+  for (const source of sources) {
+    blocks.push({
+      type: 'table',
+      title: `Data ${sourceLabel(source)}`,
+      columns: ['Tanggal', 'No. Faktur', 'Barcode', 'Nama Barang', 'Berat (gram)', 'Total Penjualan (IDR)', 'Input oleh'],
+      rows: rowsOf(source).map(row => [dateOnlyCell(row.tgl_system), cell(row.no_faktur_jual), cell(row.kode_barcode), cell(row.nama_barang), numberCell(row.berat), numberCell(row.harga_total), cell(row.input_by)]),
+    });
+    if (source.truncated) blocks.push({ type: 'callout', tone: 'info', title: 'Rincian penjualan', text: `${sourceLabel(source)}: menampilkan ${rowsOf(source).length} data transaksi. Total penjualan sudah mencakup seluruh periode. Persempit tanggal untuk melihat rincian lainnya.` });
+  }
 }
 
 function addPurchaseBlocks(blocks: AgentResponseBlock[], sources: UnknownRecord[]) {

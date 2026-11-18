@@ -1,0 +1,28 @@
+node_modules/
+dist/
+coverage/
+.cache/
+
+# Environment files can contain database credentials, API keys, and JWT secrets.
+.env
+.env.*
+!.env.example
+
+# Runtime output and local databases.
+logs/
+*.log
+*.pid
+*.sqlite
+*.sqlite3
+*.db
+
+# Credentials, certificates, and private keys.
+key_app.json
+*.pem
+*.key
+*.crt
+*.cer
+*.p12
+*.pfx
+.npmrc
+!.npmrc.example

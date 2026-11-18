@@ -1,0 +1,59 @@
+{
+  "name": "pantes-tracking-api",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Backend API for monitoring shipments between the central office and branches.",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "start": "node dist/main.js",
+    "start:dev": "nest start --watch",
+    "build": "nest build",
+    "admin:create": "tsx scripts/create-admin.ts",
+    "sources:classify-items": "tsx scripts/classify-source-items.ts",
+    "typecheck": "tsc --noEmit",
+    "test:banking": "tsx scripts/check-banking.ts",
+    "knowledge:warm": "tsx scripts/warm-knowledge.ts",
+    "test:knowledge": "npm run build && node dist/scripts/check-knowledge.js",
+    "test:learning": "npm run build && node dist/scripts/check-learning.js",
+    "test:agent-skills": "npm run build && node scripts/check-agent-skills.cjs",
+    "test:restock:weekly": "npm run build && node scripts/check-weekly-restock.cjs",
+    "test:sales:branches": "npm run build && node dist/scripts/check-branch-sales.js",
+    "test:restock:offer": "npm run build && node scripts/check-offered-stock.cjs",
+    "test:stock-baselines": "npm run build && node scripts/check-stock-baselines.cjs && node --experimental-strip-types scripts/check-baseline-csv.mjs",
+    "test:distribution-priority": "npm run build && node scripts/check-distribution-priority.cjs"
+  },
+  "dependencies": {
+    "@fastify/cookie": "^11.1.3",
+    "@fastify/helmet": "^13.2.0",
+    "@fastify/multipart": "^10.1.6",
+    "@huggingface/transformers": "^4.3.2",
+    "@nestjs/common": "^12.2.0",
+    "@nestjs/core": "^12.2.0",
+    "@nestjs/jwt": "^12.0.3",
+    "@nestjs/platform-fastify": "^12.2.0",
+    "@nestjs/throttler": "^6.7.1",
+    "@types/yauzl": "^3.4.0",
+    "argon2": "^0.45.1",
+    "class-transformer": "^0.5.1",
+    "class-validator": "^0.15.1",
+    "dotenv": "^18.0.8",
+    "mammoth": "^1.13.0",
+    "mongodb": "^7.7.0",
+    "pdf-parse": "^2.4.5",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.2",
+    "yauzl": "^3.4.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@nestjs/cli": "^11.0.16",
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/node": "^22.20.0",
+    "ts-node": "^10.9.2",
+    "tsx": "^4.23.15",
+    "typescript": "~5.9.3"
+  }
+}

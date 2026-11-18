@@ -1,0 +1,7 @@
+export type BankSource = { databaseName: string; alias: string; branchId: string; sourceType: 'branch' | 'central' };
+export type BankAccount = { id: string; branchId: string; sourceAlias: string; bankCode: string; bankName: string; accountNumber: string; accountName: string };
+export type BankSelection = { branchIds: string[]; accountIds: string[]; from: string; to: string; method: 'TRANSFER' | 'ALL'; category: 'ALL' | 'PENJUALAN' | 'PEMBELIAN'; statementIds: string[] };
+export type BankEntry = { id: string; date: string; description: string; reference: string; direction: 'IN' | 'OUT' | 'UNKNOWN'; amount: number; balance: number | null; page: number };
+export type BankStatement = { id: string; attachmentId: string; filename: string; bankName: string; accountNumber: string; currency: string; from: string; to: string; openingBalance: number | null; closingBalance: number | null; entries: BankEntry[]; complete: boolean; dateConflict?: boolean; warnings: string[] };
+export type BankTransaction = { id: string; branchId: string; sourceAlias: string; accountId: string; bankCode: string; bankName: string; accountNumber: string; date: string; reference: string; invoices: string[]; customer: string; category: string; method: string; description: string; moneyIn: number; moneyOut: number; inputBy: string };
+export type BankMatch = { transactionId: string | null; entryId: string | null; status: 'MATCHED' | 'REVIEW' | 'SYSTEM_ONLY' | 'BANK_ONLY'; reason: string };

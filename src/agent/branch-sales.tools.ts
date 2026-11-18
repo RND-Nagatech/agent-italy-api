@@ -1,0 +1,11 @@
+const properties = {
+  from: { type: 'string', description: 'Tanggal awal YYYY-MM-DD inklusif, Jakarta.' }, to: { type: 'string', description: 'Tanggal akhir YYYY-MM-DD inklusif, maksimum 366 hari.' },
+  branchIds: { type: 'array', items: { type: 'string' }, minItems: 1, maxItems: 100, description: 'ID cabang dari sumber yang diizinkan. Tanpa filter berarti seluruh cabang yang boleh diakses.' },
+  jenisCode: { type: 'string', maxLength: 80, description: 'Opsional filter kode Jenis.' },
+  includeJenis: { type: 'boolean', description: 'true untuk memperinci per Jenis. Default false pada ringkasan cabang, true pada laporan per sales.' },
+  page: { type: 'integer', minimum: 1, description: 'Halaman Jenis untuk get_branch_sales; halaman sales untuk get_sales_by_salesperson.' }, pageSize: { type: 'integer', minimum: 1, maximum: 20, description: 'Maksimum 20; gunakan 5 untuk ringkasan seluruh cabang.' },
+};
+export const branchSalesTools = [
+  { name: 'get_branch_sales', description: 'Ringkasan penjualan setiap cabang pada periode pengguna. Eskalasi rincian per Jenis: panggil lagi dengan branchIds cabang tersebut dan includeJenis=true; pilih jenisCode untuk satu Jenis, gunakan page untuk halaman lanjut. Total gram dan rupiah mencakup seluruh hasil filter, bukan halaman saja. Tidak mencampur cabang Pusat.', properties },
+  { name: 'get_sales_by_salesperson', description: 'Penjualan per cabang → kode_sales → Jenis. Lookup tm_sales pada cabang yang sama dan decrypt nama_sales. Jangan gabungkan sales berkode sama antar cabang. Default mencakup rincian Jenis setiap sales; filter salesCode untuk pendalaman satu sales, jenisCode untuk satu Jenis. page untuk sales, jenisPage untuk rincian Jenis. Nama gagal tetap tampilkan kode dan peringatan. Semua kuantitas gram, nilai rupiah.', properties: { ...properties, salesCode: { type: 'string', maxLength: 80, description: 'Kode sales dari hasil tool, bukan nama; pilih branchIds juga agar tidak tertukar antar cabang.' }, jenisPage: { type: 'integer', minimum: 1 }, jenisPageSize: { type: 'integer', minimum: 1, maximum: 20 } } },
+].map(({ properties, ...tool }) => ({ type: 'function' as const, function: { ...tool, parameters: { type: 'object', properties, required: ['from', 'to'], additionalProperties: false } } }));

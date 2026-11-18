@@ -1,0 +1,11 @@
+const common = {
+  branchIds: { type: 'array', items: { type: 'string' }, minItems: 1, maxItems: 100, description: 'ID sumber yang diizinkan, bukan nama database. Kosongkan untuk semua sumber yang boleh diakses.' },
+  jenisCode: { type: 'string', maxLength: 64 },
+};
+const period = { from: { type: 'string', description: 'Tanggal awal YYYY-MM-DD inklusif, Jakarta' }, to: { type: 'string', description: 'Tanggal akhir YYYY-MM-DD inklusif, Jakarta' } };
+export const atomicTools = [
+  { name: 'get_sales_period', description: 'Fungsi atomik penjualan tt_jual_detail per cabang dan Jenis pada periode tertentu. Berat terjual dalam gram dan nilai penjualan IDR, filter penjualan valid. Dapat digabung dengan fungsi stok/pengiriman/buyback.' },
+  { name: 'get_current_stock', description: 'Fungsi atomik stok fisik saat ini dari tm_barang per sumber Cabang/Pusat dan Jenis. Untuk pertanyaan “stok CN di Pusat”, gunakan sourceType=central dan jenisCode=CN. Laporkan pcs dari stock_on_hand; gunakan qty hanya bila stock_on_hand null/tidak tersedia. Berat tersedia terpisah sebagai berat×pcs dalam gram. Cocok untuk permintaan stok satu lokasi atau satu Jenis; tidak menerima periode dan bukan stok historis.' },
+  { name: 'get_shipments_period', description: 'Fungsi atomik pengiriman dari database Pusat tt_kirim_barang, tujuan cabang terpilih, periode berdasarkan tanggal input kiriman. Gram OPEN dan CLOS terpisah; CLOS jangan ditambahkan lagi ke stok fisik.' },
+  { name: 'get_buyback_period', description: 'Fungsi atomik kandidat buyback yang saat ini belum disortir/tidak hancur/tidak CANC dari tt_beli_detail per cabang dan Jenis yang tercatat dalam periode (input_date, fallback tgl_system), gram. Bukan saldo historis.' },
+].map(tool => ({ type: 'function' as const, function: { ...tool, parameters: { type: 'object', properties: { ...common, ...(tool.name === 'get_current_stock' ? { sourceType: { type: 'string', enum: ['branch', 'central'], description: 'Batasi ke lokasi bertipe Cabang atau Pusat. Gunakan central bila pengguna menyebut Pusat.' } } : period), ...(tool.name === 'get_shipments_period' ? { shipmentStatus: { type: 'string', enum: ['OPEN', 'CLOS', 'all'], description: 'Default all, hasil OPEN/CLOS dipisah.' } } : {}) }, ...(tool.name === 'get_current_stock' ? {} : { required: ['from', 'to'] }), additionalProperties: false } } }));

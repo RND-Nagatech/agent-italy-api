@@ -265,8 +265,8 @@ export class AuthService {
       {
         secret: env.jwtAccessSecret,
         algorithm: 'HS256',
-        issuer: 'pantes-tracking-api',
-        audience: 'pantes-tracking-client',
+        issuer: 'italy-tracking-api',
+        audience: 'italy-tracking-client',
         expiresIn: env.accessTokenTtlSeconds,
       },
     );

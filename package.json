@@ -1,5 +1,5 @@
 {
-  "name": "pantes-tracking-api",
+  "name": "italy-tracking-api",
   "version": "0.1.0",
   "private": true,
   "description": "Backend API for monitoring shipments between the central office and branches.",

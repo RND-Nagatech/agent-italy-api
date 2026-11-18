@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import assert from 'node:assert/strict';
 async function main() {
-  const base = `pantes_sales_qa_${Date.now()}`;
+  const base = `italy_sales_qa_${Date.now()}`;
   process.env.SYSTEM_DATABASE_NAME = base; process.env.ENC_KEY_DEC = 'qa-key';
   const [{ MongoService }, { BranchSalesService, branchSalesPipeline }, { env }, { compactBranchSales, branchSalesBlocks }] = await Promise.all([import('../src/database/mongo.service'), import('../src/agent/branch-sales.service'), import('../src/config/env'), import('../src/agent/branch-sales.blocks')]);
   const mongo = new MongoService(); await mongo.onModuleInit();
@@ -58,7 +58,7 @@ async function main() {
     const pipe = branchSalesPipeline(true,args); assert.equal(pipe[0].$match.status_valid,'DONE'); assert.equal(pipe[0].$match.status_kembali,'OPEN'); assert(!JSON.stringify(pipe).includes('$unwind'));
     console.log('PASS branch sales: real isolated Mongo aggregates, branch → sales → Jenis, decrypted names, same-code branch isolation, duplicate master without fan-out, gram/IDR totals, pagination, scope, missing data and safe blocks.');
   } finally {
-    for (const name of [base,...sources.map(source=>source.databaseName)]) { assert(name.startsWith('pantes_sales_qa_')); await mongo.getDatabase(name).dropDatabase(); }
+    for (const name of [base,...sources.map(source=>source.databaseName)]) { assert(name.startsWith('italy_sales_qa_')); await mongo.getDatabase(name).dropDatabase(); }
     await mongo.onModuleDestroy();
   }
 }

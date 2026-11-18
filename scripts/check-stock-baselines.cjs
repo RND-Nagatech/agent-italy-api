@@ -13,7 +13,7 @@ const {StockBaselineController}=require('../dist/src/stock-baselines/stock-basel
 const {normalizeAgentResponseBlocks}=require('../dist/src/agent/response-blocks');
 (async()=>{
  const client=new MongoClient('mongodb://127.0.0.1:27017',{serverSelectionTimeoutMS:3000});await client.connect();
- const dbName=`pantes_baseline_qa_${Date.now()}`,centralName=`${dbName}_central`;
+ const dbName=`italy_baseline_qa_${Date.now()}`,centralName=`${dbName}_central`;
  const db=client.db(dbName),central=client.db(centralName);
  const mongo={db,getDatabase:name=>client.db(name)};
  const cleared=[],keys=[];
@@ -25,7 +25,7 @@ const {normalizeAgentResponseBlocks}=require('../dist/src/agent/response-blocks'
     sources[0],
     ...sources.slice(1).map(({sourceType,...source},index)=>index===0?source:{...source,sourceType:null}),
     ...Array.from({length:29},(_,index)=>({branchId:`LEGACY${index}`,alias:`Legacy ${index}`,databaseName:`legacy_${index}`,active:index!==0})),
-    {branchId:'GTS',alias:'PANTES KGTS',databaseName:'explicit_gts',sourceType:'branch',active:true},
+    {branchId:'GTS',alias:'italy KGTS',databaseName:'explicit_gts',sourceType:'branch',active:true},
   ]);
   await db.collection('users').insertOne({_id:actor,name:'QA owner',passwordHash:'never exposed',email:'private'});
   await central.collection('tm_dept').insertMany([{kode_dept:'CN',nama_dept:'CINCIN'},{kode_dept:'GA',nama_dept:'GELANG ANAK'}]);

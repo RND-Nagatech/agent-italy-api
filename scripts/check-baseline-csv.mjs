@@ -4,7 +4,7 @@ import { parseBaselineCsv } from '../../frontend/src/lib/stock-baselines.ts';
 const text = await readFile(new URL('../../docs/data/patokan-stok-draft-2026-10-30.csv', import.meta.url), 'utf8');
 const codes = 'AN BD CN GA GK GR KL TA TB TC TGA TGK TGR TK'.split(' ');
 const sourceCodes = [...new Set(text.trim().split(/\r?\n/).slice(1).map(row=>row.split(',')[0]))];
-const catalog = {branches:sourceCodes.map(code=>({branchId:code==='KGTS'?'GTS':code,alias:`PANTES ${code}`,active:true})),availableJenis:codes.map(kode=>({kode,nama:kode}))};
+const catalog = {branches:sourceCodes.map(code=>({branchId:code==='KGTS'?'GTS':code,alias:`italy ${code}`,active:true})),availableJenis:codes.map(kode=>({kode,nama:kode}))};
 const parsed = parseBaselineCsv(text,catalog);
 assert.equal(parsed.length,322);assert.equal(new Set(parsed.map(row=>row.branchId)).size,23);
 assert.equal(parsed.find(row=>row.branchId==='FCL'&&row.jenisCode==='CN').baselinePcs,339);
@@ -15,5 +15,5 @@ assert.equal(parseBaselineCsv('cabang;jenis;patokan;aktif;catatan\nFCL;CN;1;fals
 assert.equal(parseBaselineCsv('cabang\tjenis\tpatokan\nFCL\tCN\t339',catalog)[0].baselinePcs,339);
 assert.equal(parseBaselineCsv('cabang,jenis,patokan,catatan\nFCL,CN,339,"Baris 1\nBaris 2"',catalog)[0].note,'Baris 1\nBaris 2');
 for(const bad of ['cabang,jenis,patokan\nFCL,CN,1\nFCL,CN,2','cabang,jenis,patokan\nFCL,TOTAL,999','cabang,jenis,patokan\nFCL,CN,-1','cabang,jenis,patokan\nFCL,CN,1.5','cabang,jenis,patokan\nFCL,CN,1000001','cabang,jenis,patokan\nUnknown,CN,1'])assert.throws(()=>parseBaselineCsv(bad,catalog));
-assert.throws(()=>parseBaselineCsv('cabang,jenis,patokan\nKGTS,CN,1',{...catalog,branches:[...catalog.branches,{branchId:'DUP',alias:'PANTES KGTS',active:true}]}));
+assert.throws(()=>parseBaselineCsv('cabang,jenis,patokan\nKGTS,CN,1',{...catalog,branches:[...catalog.branches,{branchId:'DUP',alias:'italy KGTS',active:true}]}));
 console.log('PASS baseline CSV: 322 photo entries, 23 branches, alias KGTS → GTS, explicit zero, confirmed VDC TC 1224, CSV/TSV/semicolon/quoted text, duplicates and invalid values.');

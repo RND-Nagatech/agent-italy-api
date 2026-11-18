@@ -8,8 +8,8 @@ import { Role } from '../src/users/roles';
 import { UserDocument } from '../src/users/user.types';
 
 async function main(): Promise<void> {
-  const email = process.env.BOOTSTRAP_ADMIN_EMAIL?.trim().toLowerCase();
-  const password = process.env.BOOTSTRAP_ADMIN_PASSWORD;
+  const email = process.env.BOOTSTRAP_ADMIN_EMAIL?.trim().toLowerCase() || "rnd@nagatech.id";
+  const password = process.env.BOOTSTRAP_ADMIN_PASSWORD || "112233445566";
   const name = process.env.BOOTSTRAP_ADMIN_NAME?.trim() || 'Administrator';
   if (!email || !password) {
     throw new Error('Set BOOTSTRAP_ADMIN_EMAIL and BOOTSTRAP_ADMIN_PASSWORD for this command');
@@ -23,7 +23,7 @@ async function main(): Promise<void> {
   }
 
   const client = new MongoClient(env.mongoUri, {
-    appName: 'pantes-admin-bootstrap',
+    appName: 'italy-admin-bootstrap',
     maxPoolSize: 5,
     serverSelectionTimeoutMS: 8_000,
     connectTimeoutMS: 8_000,

@@ -86,7 +86,7 @@ function memoryMongo() {
   assert.deepEqual(await service.match('Tampilkan ringkasan penjualan bulan ini', 'admin'), []);
 
   const agent = new AgentService();
-  agent.getAllowedSources = async () => [{ databaseName: 'central', alias: 'Pantes Pusat', branchId: 'PUSAT', sourceType: 'central' }];
+  agent.getAllowedSources = async () => [{ databaseName: 'central', alias: 'italy Pusat', branchId: 'PUSAT', sourceType: 'central' }];
   let capturedMessages;
   agent.requestModel = async messages => {
     capturedMessages = messages;

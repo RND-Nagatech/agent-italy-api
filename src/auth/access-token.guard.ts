@@ -42,8 +42,8 @@ export class AccessTokenGuard implements CanActivate {
         type: string;
       }>(token, {
         secret: env.jwtAccessSecret,
-        issuer: 'pantes-tracking-api',
-        audience: 'pantes-tracking-client',
+        issuer: 'italy-tracking-api',
+        audience: 'italy-tracking-client',
         algorithms: ['HS256'],
       });
 

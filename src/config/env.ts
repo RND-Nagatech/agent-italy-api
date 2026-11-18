@@ -27,8 +27,8 @@ const environmentSchema = z.object({
   KNOWLEDGE_ENABLED: z.enum(['true', 'false']).default('true').transform(v => v === 'true'),
   KNOWLEDGE_MAX_FILE_MB: z.coerce.number().int().min(1).max(50).default(20),
   QDRANT_URL: z.string().url().default('http://127.0.0.1:6333'),
-  QDRANT_COLLECTION: z.string().regex(/^[a-zA-Z0-9_-]+$/).default('pantes_knowledge_e5_v1'),
-  AGENT_HISTORY_QDRANT_COLLECTION: z.string().regex(/^[a-zA-Z0-9_-]+$/).default('pantes_agent_history_e5_v1'),
+  QDRANT_COLLECTION: z.string().regex(/^[a-zA-Z0-9_-]+$/).default('italy_knowledge_e5_v1'),
+  AGENT_HISTORY_QDRANT_COLLECTION: z.string().regex(/^[a-zA-Z0-9_-]+$/).default('italy_agent_history_e5_v1'),
   EMBEDDING_MODEL: z.string().default('Xenova/multilingual-e5-small'),
   EMBEDDING_REVISION: z.string().default('main'),
   EMBEDDING_DIMENSIONS: z.coerce.number().int().min(64).max(4096).default(384),
@@ -38,7 +38,7 @@ const environmentSchema = z.object({
   HINDSIGHT_API_KEY: z.string().trim().default(''),
   HINDSIGHT_AUTO_LEARN: z.enum(['true', 'false']).default('true').transform(v => v === 'true'),
   HINDSIGHT_LEARN_HISTORY: z.enum(['true', 'false']).default('true').transform(v => v === 'true'),
-  HINDSIGHT_BANK_ID: z.string().regex(/^[a-zA-Z0-9_-]+$/).default('pantes-shared-v1'),
+  HINDSIGHT_BANK_ID: z.string().regex(/^[a-zA-Z0-9_-]+$/).default('italy-shared-v1'),
   ENC_KEY_DEC: z.string().trim().default(''),
 });
 

@@ -2,7 +2,7 @@ import 'dotenv/config';
 import assert from 'node:assert/strict';
 import { ObjectId } from 'mongodb';
 async function main() {
-  process.env.SYSTEM_DATABASE_NAME = `pantes_learning_qa_${Date.now()}`;
+  process.env.SYSTEM_DATABASE_NAME = `italy_learning_qa_${Date.now()}`;
   process.env.HINDSIGHT_AUTO_LEARN = 'true';
   process.env.HINDSIGHT_LEARN_HISTORY = 'true';
   const [{ NestFactory }, { AppModule }, { MongoService }, { MemoryLearningService }, { KnowledgeWorker }, policy] = await Promise.all([import('@nestjs/core'), import('../src/app.module'), import('../src/database/mongo.service'), import('../src/knowledge/memory-learning.service'), import('../src/knowledge/knowledge.worker'), import('../src/knowledge/learning-policy')]);
@@ -11,7 +11,7 @@ async function main() {
   clearInterval((learner as any).timer); clearInterval((app.get(KnowledgeWorker) as any).timer);
   let calls = 0;
   const text = 'Koreksi istilah: kode_dept berarti Jenis perhiasan, bukan departemen organisasi.';
-  const candidate = { title: 'Makna Jenis', text: 'Field kode_dept pada Pantes menunjukkan Jenis perhiasan, bukan departemen organisasi.', key: 'jenis.kode_dept', category: 'terminology', scope: 'global', evidence: text, confidence: 0.98 };
+  const candidate = { title: 'Makna Jenis', text: 'Field kode_dept pada italy menunjukkan Jenis perhiasan, bukan departemen organisasi.', key: 'jenis.kode_dept', category: 'terminology', scope: 'global', evidence: text, confidence: 0.98 };
   (learner as any).extract = async () => { calls++; return JSON.stringify({ memories: [candidate] }); };
   const room = new ObjectId(), ownerId = 'qa-user';
   try {
@@ -28,7 +28,7 @@ async function main() {
     assert.equal(await mongo.db.collection('knowledge_jobs').countDocuments({ kind: 'retain' }), 1);
     await learner.enqueue('other-user', room.toString(), 'wrong-owner', text); await learner.tick(); assert.equal(calls, 1);
     await learner.enqueue(ownerId, room.toString(), 'duplicate', text); await learner.tick(); assert.equal(await memories.countDocuments(), 1);
-    candidate.text = 'Field kode_dept pada Pantes menunjukkan kelompok jenis perhiasan untuk laporan toko.';
+    candidate.text = 'Field kode_dept pada italy menunjukkan kelompok jenis perhiasan untuk laporan toko.';
     await learner.enqueue(ownerId, room.toString(), 'conflict', text); await learner.tick();
     const conflict = await memories.findOne({ status: 'pending' }); assert.equal(conflict?.conflictWith, first._id.toString()); assert.equal(await mongo.db.collection('knowledge_jobs').countDocuments({ kind: 'retain' }), 1);
     const privateDoc = new ObjectId(); await mongo.db.collection('knowledge_documents').insertOne({ _id: privateDoc, visibility: 'branches', deleted: false });
@@ -58,6 +58,6 @@ async function main() {
     await app.get(AgentSessionsService).delete(newRoom.id, ownerId);
     assert.equal((await mongo.db.collection('memory_learning_events').findOne({ requestId: 'qa-chat-exchange' }))?.status, 'cancelled');
     console.log('PASS learning: extraction policy, auto publish, conflict review, dedup, tombstones, ownership, private context, credentials, history and retry.');
-  } finally { assert(mongo.db.databaseName.startsWith('pantes_learning_qa_')); await mongo.db.dropDatabase(); await app.close(); }
+  } finally { assert(mongo.db.databaseName.startsWith('italy_learning_qa_')); await mongo.db.dropDatabase(); await app.close(); }
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

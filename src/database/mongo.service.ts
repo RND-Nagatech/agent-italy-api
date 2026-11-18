@@ -6,7 +6,7 @@ import { ensureMongoIndexes } from './mongo-indexes';
 @Injectable()
 export class MongoService implements OnModuleInit, OnModuleDestroy {
   private readonly client = new MongoClient(env.mongoUri, {
-    appName: 'pantes-tracking-api',
+    appName: 'italy-tracking-api',
     maxPoolSize: env.mongoMaxPoolSize,
     serverSelectionTimeoutMS: 8_000,
     connectTimeoutMS: 8_000,

@@ -17,7 +17,7 @@ const {networkRestockPcsBlocks}=require('../dist/src/agent/restock-pcs.blocks');
 const baseline={snapshot:async()=>({revision:0,items:[],updatedAt:null})};
 (async()=>{
  const client=new MongoClient('mongodb://127.0.0.1:27017',{serverSelectionTimeoutMS:3000});await client.connect();
- const db=client.db(`pantes_priority_qa_${Date.now()}`),cleared=[],keys=[];
+ const db=client.db(`italy_priority_qa_${Date.now()}`),cleared=[],keys=[];
  const cache={clearByPrefix:prefix=>cleared.push(prefix),getOrLoadWithStatus:async(key,load)=>{keys.push(key);return {value:await load(),cacheStatus:'miss'}}};
  try{
   const manager=new SourcesService({db},cache),input={databaseName:'branch_fcl',alias:'FCL',branchId:'FCL',sourceType:'branch'};

@@ -174,8 +174,8 @@ function parseChatBaselineMatrix(text: string, catalog: Awaited<ReturnType<Stock
   }
   const branchIds = rawBranchHeaders.map(rawHeader => {
     const exact = catalog.branches.filter(branch => branch.branchId.trim().toUpperCase() === rawHeader.toUpperCase());
-    const normalizedHeader = normalize(rawHeader.replace(/^PANTES\s+/i, ''));
-    const aliases = catalog.branches.filter(branch => normalize(branch.alias.replace(/^PANTES\s+/i, '')) === normalizedHeader);
+    const normalizedHeader = normalize(rawHeader.replace(/^italy\s+/i, ''));
+    const aliases = catalog.branches.filter(branch => normalize(branch.alias.replace(/^italy\s+/i, '')) === normalizedHeader);
     const matches = exact.length ? exact : aliases;
     if (matches.length !== 1) throw new BadRequestException(`Kolom cabang “${rawHeader}” tidak dikenal atau aliasnya ambigu. Gunakan Branch ID/alias dari menu Sumber data.`);
     return matches[0].branchId;

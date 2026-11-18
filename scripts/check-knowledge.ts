@@ -5,14 +5,14 @@ import { execFileSync } from 'node:child_process';
 
 async function main() {
   const suffix = Date.now().toString();
-  const databaseName = `pantes_knowledge_qa_${suffix}`;
-  const collectionName = `pantes_knowledge_qa_${suffix}`;
+  const databaseName = `italy_knowledge_qa_${suffix}`;
+  const collectionName = `italy_knowledge_qa_${suffix}`;
   process.env.HINDSIGHT_AUTO_LEARN = 'false';
   process.env.SYSTEM_DATABASE_NAME = databaseName;
   process.env.QDRANT_COLLECTION = collectionName;
   process.env.HINDSIGHT_API_KEY = 'offline-qa-credential';
   process.env.HINDSIGHT_BASE_URL = 'http://127.0.0.1:18888';
-  process.env.HINDSIGHT_BANK_ID = 'pantes-qa-shared';
+  process.env.HINDSIGHT_BANK_ID = 'italy-qa-shared';
   const [{ NestFactory }, { FastifyAdapter }, { ValidationPipe }, { JwtService }, { AppModule }, { MongoService }, { KnowledgeWorker }, { KnowledgeService }, { SharedMemoryService }, { env }, { EmbeddingService }, { extractDocument, chunkPages }] = await Promise.all([
     import('@nestjs/core'), import('@nestjs/platform-fastify'), import('@nestjs/common'), import('@nestjs/jwt'), import('../src/app.module'), import('../src/database/mongo.service'), import('../src/knowledge/knowledge.worker'), import('../src/knowledge/knowledge.service'), import('../src/knowledge/memory.service'), import('../src/config/env'), import('../src/knowledge/embedding.service'), import('../src/knowledge/document-parser'),
   ]);
@@ -25,7 +25,7 @@ async function main() {
     if (url.endsWith('/memories') && init?.method === 'POST') { const body = JSON.parse(String(init.body)); for (const item of body.items) retained.set(item.document_id,item.content); return Response.json({success:true}); }
     if (url.endsWith('/memories/recall')) return Response.json({results:[...retained].map(([document_id,text])=>({document_id,text,id:randomUUID()}))});
     if (url.includes('/documents/') && init?.method === 'DELETE') { retained.delete(decodeURIComponent(url.split('/').at(-1)!)); return Response.json({success:true}); }
-    return Response.json({bank_id:'pantes-qa-shared'});
+    return Response.json({bank_id:'italy-qa-shared'});
   }) as typeof fetch;
   const adapter = new FastifyAdapter({bodyLimit:25*1024*1024});
   const app = await NestFactory.create(AppModule,adapter,{logger:['error'],abortOnError:false});
@@ -36,7 +36,7 @@ async function main() {
   const mongo=app.get(MongoService),worker=app.get(KnowledgeWorker),knowledge=app.get(KnowledgeService),memory=app.get(SharedMemoryService);
   clearInterval((worker as any).timer);
   const jwt=new JwtService();
-  const token=(role:string,branchId:string|null)=>jwt.sign({sub:`qa-${role}-${branchId}`,role,branchId,type:'access'},{secret:env.jwtAccessSecret,issuer:'pantes-tracking-api',audience:'pantes-tracking-client',expiresIn:600});
+  const token=(role:string,branchId:string|null)=>jwt.sign({sub:`qa-${role}-${branchId}`,role,branchId,type:'access'},{secret:env.jwtAccessSecret,issuer:'italy-tracking-api',audience:'italy-tracking-client',expiresIn:600});
   const admin={authorization:`Bearer ${token('admin',null)}`},central={authorization:`Bearer ${token('pusat',null)}`},fcl={authorization:`Bearer ${token('cabang','FCL')}`},cwk={authorization:`Bearer ${token('cabang','CWK')}`};
   const api=(method:string,path:string,headers: Record<string,string>=admin,payload?:any)=>adapter.getInstance().inject({method:method as any,url:'/api/v1'+path,headers,payload});
   const upload=async(text:string,title:string,visibility='global',branchIds:string[]=[],headers=admin,replacesId?:string)=>{
@@ -49,7 +49,7 @@ async function main() {
     assert.equal((await api('GET','/knowledge',{} as any)).statusCode,401);
     await mongo.db.collection('shipment_sources').insertMany([{alias:'QA FCL',branchId:'FCL',databaseName:'qa_fcl',active:true,sourceType:'branch'},{alias:'QA CWK',branchId:'CWK',databaseName:'qa_cwk',active:true,sourceType:'branch'}]);
     const forbidden=await upload('Tidak boleh mengunggah oleh akun cabang.','Forbidden','global',[],fcl);assert.equal(forbidden.statusCode,403);
-    const text='SOP distribusi perhiasan emas Pantes. Safety stock cincin dihitung dalam gram. Sebelum mengirim stok, periksa kebutuhan cabang dan kiriman yang masih OPEN. Dokumen ini adalah fixture QA.';
+    const text='SOP distribusi perhiasan emas italy. Safety stock cincin dihitung dalam gram. Sebelum mengirim stok, periksa kebutuhan cabang dan kiriman yang masih OPEN. Dokumen ini adalah fixture QA.';
     const response=await upload(text,'QA SOP distribusi');assert.equal(response.statusCode,201,response.body);const id=response.json().id;
     assert.equal((await api('GET',`/knowledge/${id}`,fcl)).statusCode,404,'Draft must be invisible to branches');
     await worker.tick();
@@ -68,14 +68,14 @@ async function main() {
     await api('PATCH',`/knowledge/${id}`,admin,{active:false});
     const disabled=await api('POST','/knowledge/search',fcl,{query:'SOP distribusi perhiasan emas'});assert(!disabled.json().references.some((r:any)=>r.documentId===id));
     const newer=await upload(text+' Versi kedua yang sudah diperbarui.','QA SOP v2','global',[],admin,id);assert.equal(newer.statusCode,201,newer.body);await worker.tick();const nid=newer.json().id;await api('PATCH',`/knowledge/${nid}`,admin,{active:true});assert.equal((await api('GET',`/knowledge/${id}`)).json().active,false);
-    const proposal=await api('POST','/knowledge/memories',fcl,{title:'Istilah Jenis',text:'Kode dept pada database Pantes berarti jenis perhiasan, bukan departemen organisasi.'});assert.equal(proposal.statusCode,201,proposal.body);const mid=proposal.json()._id;
+    const proposal=await api('POST','/knowledge/memories',fcl,{title:'Istilah Jenis',text:'Kode dept pada database italy berarti jenis perhiasan, bukan departemen organisasi.'});assert.equal(proposal.statusCode,201,proposal.body);const mid=proposal.json()._id;
     assert.equal((await api('POST',`/knowledge/memories/${mid}/approve`,fcl)).statusCode,403);
     assert.equal((await api('GET','/knowledge/memories',cwk)).json().items.length,0,'Pending private to proposer and managers');
     await api('POST',`/knowledge/memories/${mid}/approve`,admin);await worker.tick();
     assert.equal((await api('GET','/knowledge/memories',cwk)).json().items[0].status,'ready');
-    assert.equal((await memory.recall('Arti dept di Pantes')).items.length,1);
+    assert.equal((await memory.recall('Arti dept di italy')).items.length,1);
     await api('DELETE',`/knowledge/memories/${mid}`,admin);
-    assert.equal((await memory.recall('Arti dept di Pantes')).items.length,0,'Retired memory blocked even before remote purge');await worker.tick();assert.equal(retained.size,0);
+    assert.equal((await memory.recall('Arti dept di italy')).items.length,0,'Retired memory blocked even before remote purge');await worker.tick();assert.equal(retained.size,0);
     await api('DELETE',`/knowledge/${rid}`,admin);assert.equal((await api('GET',`/knowledge/${rid}/file`,fcl)).statusCode,404);await worker.tick();
     const { AgentService } = await import('../src/agent/agent.service');
     const agent = app.get(AgentService);
@@ -90,7 +90,7 @@ async function main() {
     assert(chat.json().knowledgeReferences.some((ref:any)=>ref.documentId===nid),chat.body);
     const roomDetail = (await api('GET',`/agent/sessions/${room.id}`,cwk)).json();assert(roomDetail.messages[1].knowledgeReferences.some((ref:any)=>ref.documentId===nid));
     const memoryRequest=randomUUID();
-    const memoryChat={sessionId:room.id,requestId:memoryRequest,messages:[{role:'user',content:'Ingat bahwa kode dept pada Pantes merupakan jenis perhiasan, bukan departemen organisasi.'}]};
+    const memoryChat={sessionId:room.id,requestId:memoryRequest,messages:[{role:'user',content:'Ingat bahwa kode dept pada italy merupakan jenis perhiasan, bukan departemen organisasi.'}]};
     const proposed = await api('POST','/agent/chat',cwk,memoryChat);assert.equal(proposed.statusCode,201,proposed.body);assert.equal(proposed.json().memoryProposal,undefined);
     await api('POST','/agent/chat',cwk,memoryChat);assert.equal(await mongo.db.collection('shared_memories').countDocuments({requestId:memoryRequest}),0);
     assert.equal((await api('DELETE',`/agent/sessions/${room.id}?forgetMemories=1`,cwk)).statusCode,403);
@@ -115,7 +115,7 @@ async function main() {
     console.log('PASS: real MongoDB/GridFS + local 384d embeddings + Qdrant; multipart roles, draft/publication/version, per-branch isolation, search, downloads, retirement; mocked Hindsight approve/recall/delete; Agent context/citation persistence, manual memory proposal and chat cleanup; PDF/DOCX/TXT validation.');
   } finally {
     try {
-      assert(databaseName.startsWith('pantes_knowledge_qa_')); await mongo.db.dropDatabase();
+      assert(databaseName.startsWith('italy_knowledge_qa_')); await mongo.db.dropDatabase();
       try { await fetchOriginal(`${env.qdrantUrl}/collections/${collectionName}`,{method:'DELETE',signal:AbortSignal.timeout(5000)}); }
       catch { console.warn(`QA vector cleanup pending: ${collectionName}`); }
     } finally { globalThis.fetch=fetchOriginal; await app.close(); }

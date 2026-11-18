@@ -23,6 +23,7 @@ import { AgentHistoryService } from './agent-history.service';
 import { AgentGatewayAuditService } from './agent-gateway-audit.service';
 import { env } from '../config/env';
 import { BankingScopeDto } from './dto/banking.dto';
+import { attachmentUploadLogFor } from './attachment-upload.logger';
 
 @Controller('agent')
 @Roles(Role.Admin, Role.Central, Role.Branch)
@@ -196,14 +197,25 @@ export class AgentController {
   @Header('Cache-Control', 'no-store')
   @Throttle({ default: { limit: 12, ttl: 60_000, getTracker: agentUserTracker } })
   async uploadAttachment(@Param('sessionId') sessionId: string, @Req() request: FastifyRequest, @CurrentUser() principal: AuthPrincipal) {
-    let part: MultipartFile | undefined;
-    try { part = await request.file({ limits: { fileSize: Math.min(20, env.knowledgeMaxFileMb) * 1024 * 1024 } }); }
-    catch { throw new BadRequestException('File terlalu besar atau tidak dapat dibaca.'); }
-    if (!part || part.fieldname !== 'file') throw new BadRequestException('Pilih satu file untuk diunggah.');
-    let buffer: Buffer;
-    try { buffer = await part.toBuffer(); }
-    catch { throw new BadRequestException(`Ukuran file maksimal ${Math.floor(Math.min(20, env.knowledgeMaxFileMb))} MB.`); }
-    return this.sessions.uploadAttachment(sessionId, principal.sub, buffer, part.filename);
+    const uploadLog = attachmentUploadLogFor(request);
+    uploadLog.redact(sessionId, principal.sub);
+    try {
+      const maxBytes = Math.min(20, env.knowledgeMaxFileMb) * 1024 * 1024;
+      uploadLog.stage('multipart', { maxBytes });
+      let part: MultipartFile | undefined;
+      try { part = await request.file({ limits: { fileSize: maxBytes } }); }
+      catch (error) { throw new BadRequestException('File terlalu besar atau tidak dapat dibaca.', { cause: error }); }
+      if (!part || part.fieldname !== 'file') throw new BadRequestException('Pilih satu file untuk diunggah.');
+      uploadLog.redact(part.filename);
+      uploadLog.stage('read_file');
+      let buffer: Buffer;
+      try { buffer = await part.toBuffer(); }
+      catch (error) { throw new BadRequestException(`Ukuran file maksimal ${Math.floor(Math.min(20, env.knowledgeMaxFileMb))} MB.`, { cause: error }); }
+      return await this.sessions.uploadAttachment(sessionId, principal.sub, buffer, part.filename, uploadLog);
+    } catch (error) {
+      uploadLog.fail(error);
+      throw error;
+    }
   }
 
   @Delete('sessions/:sessionId/attachments/:attachmentId')

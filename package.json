@@ -15,6 +15,7 @@
     "sources:classify-items": "tsx scripts/classify-source-items.ts",
     "typecheck": "tsc --noEmit",
     "test:banking": "tsx scripts/check-banking.ts",
+    "test:agent-uploads": "npm run build && node scripts/check-agent-uploads.cjs",
     "knowledge:warm": "tsx scripts/warm-knowledge.ts",
     "test:knowledge": "npm run build && node dist/scripts/check-knowledge.js",
     "test:learning": "npm run build && node dist/scripts/check-learning.js",

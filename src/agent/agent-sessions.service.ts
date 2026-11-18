@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, HttpException, Injectable, InternalServerErrorException, NotFoundException } from '@nestjs/common';
 import { GridFSBucket, ObjectId } from 'mongodb';
 import { basename, extname } from 'node:path';
 import { Readable } from 'node:stream';
@@ -10,6 +10,7 @@ import { PDFParse } from 'pdf-parse';
 import type { AgentResponseBlock } from './response-blocks';
 import type { OfferedStockAllocationContext } from './offered-stock-followup';
 import { restoreOfferedStockAllocationContextFromBlocks } from './offered-stock-followup';
+import { AttachmentUploadLog } from './attachment-upload.logger';
 
 export type AgentChatAttachment = {
   id: string;
@@ -190,19 +191,35 @@ export class AgentSessionsService {
     await Promise.all(fileIds.map(fileId => this.bucket.delete(fileId).catch(() => undefined)));
   }
 
-  async uploadAttachment(sessionId: string, ownerId: string, buffer: Buffer, originalName: string) {
+  async uploadAttachment(sessionId: string, ownerId: string, buffer: Buffer, originalName: string, uploadLog = new AttachmentUploadLog()) {
+    uploadLog.redact(sessionId, ownerId, originalName);
+    try {
+      return await this.storeAttachment(sessionId, ownerId, buffer, originalName, uploadLog);
+    } catch (error) {
+      uploadLog.fail(error);
+      if (error instanceof HttpException) throw error;
+      throw new InternalServerErrorException('Lampiran tidak dapat diproses. Coba lagi atau hubungi admin.', { cause: error });
+    }
+  }
+
+  private async storeAttachment(sessionId: string, ownerId: string, buffer: Buffer, originalName: string, uploadLog: AttachmentUploadLog) {
+    uploadLog.stage('session_access');
     const sessionObjectId = this.parseId(sessionId);
     await this.assertOwner(sessionId, ownerId);
     const maxBytes = Math.min(20, env.knowledgeMaxFileMb) * 1024 * 1024;
     if (!buffer.length || buffer.length > maxBytes) throw new BadRequestException(`Ukuran file harus di bawah ${Math.floor(maxBytes / (1024 * 1024))} MB.`);
+    uploadLog.stage('pending_attachments', { sizeBytes: buffer.length, maxBytes });
     const pendingCount = await this.attachments.countDocuments({ sessionId: sessionObjectId, ownerId, messageId: { $exists: false } });
     if (pendingCount >= 3) throw new BadRequestException('Maksimal 3 lampiran dapat disiapkan sekaligus.');
 
     const filename = basename(originalName.replace(/\\/g, '/')).replace(/[\x00-\x1f]/g, '').slice(0, 180);
+    uploadLog.redact(filename);
     const extension = extname(filename).toLowerCase();
+    uploadLog.stage('validate_file', { extension: /^\.[a-z0-9]{1,10}$/.test(extension) ? extension : 'unsupported' });
     let mime: AgentChatAttachmentDocument['mime'];
     let extractedText: string | undefined;
     if (extension === '.pdf') {
+      uploadLog.stage('parse_pdf');
       try {
         const pages = await extractDocument(buffer, extension);
         const fullText = pages.map(page => `Halaman ${page.page}\n${page.text}`).join('\n\n').trim();
@@ -212,13 +229,14 @@ export class AgentSessionsService {
         if (error instanceof BadRequestException) throw error;
         const detail = error instanceof Error ? error.message : '';
         if (/tidak ada teks|scan|ocr/i.test(detail)) {
+          uploadLog.stage('inspect_scanned_pdf');
           const parser = new PDFParse({ data: new Uint8Array(buffer), isEvalSupported: false });
           try {
             const info = await parser.getInfo();
             if (info.total > 60) throw new BadRequestException('PDF scan maksimal 60 halaman.');
           } finally { await parser.destroy(); }
         } else {
-          throw new BadRequestException('PDF tidak dapat dibaca. Periksa file lalu coba lagi.');
+          throw new BadRequestException('PDF tidak dapat dibaca. Periksa file lalu coba lagi.', { cause: error });
         }
       }
       mime = 'application/pdf';
@@ -235,15 +253,27 @@ export class AgentSessionsService {
       mime = signature.mime;
     }
 
+    uploadLog.stage('gridfs_upload', { sizeBytes: buffer.length, mime });
     const stream = this.bucket.openUploadStream(filename, { metadata: { mime, sessionId: sessionObjectId, ownerId } });
     try { await pipeline(Readable.from([buffer]), stream); }
-    catch { await stream.abort().catch(() => undefined); throw new BadRequestException('Lampiran tidak dapat disimpan. Coba upload ulang.'); }
+    catch (error) {
+      const uploadError = new BadRequestException('Lampiran tidak dapat disimpan. Coba upload ulang.', { cause: error });
+      uploadLog.fail(uploadError);
+      await stream.abort().catch(cleanupError => uploadLog.cleanupFailed(cleanupError));
+      throw uploadError;
+    }
     const document: AgentChatAttachmentDocument = {
       _id: new ObjectId(), sessionId: sessionObjectId, ownerId, filename, mime,
       size: buffer.length, fileId: stream.id, ...(extractedText ? { extractedText } : {}), createdAt: new Date(),
     };
+    uploadLog.stage('save_metadata');
     try { await this.attachments.insertOne(document); }
-    catch (error) { await this.bucket.delete(stream.id).catch(() => undefined); throw error; }
+    catch (error) {
+      uploadLog.fail(error);
+      await this.bucket.delete(stream.id).catch(cleanupError => uploadLog.cleanupFailed(cleanupError));
+      throw error;
+    }
+    uploadLog.stage('complete', { sizeBytes: buffer.length, mime });
     return this.toAttachment(document);
   }
 

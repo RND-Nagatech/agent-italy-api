@@ -108,6 +108,20 @@ The source read does not create indexes at application startup. For high-volume 
 - Each tool call resolves sources from active `shipment_sources` records. Branch accounts are restricted in the backend to the branch source whose `branchId` exactly matches the account's branch ID. Database names, MongoDB URI, and provider key are not returned to the frontend or model.
 - Shipment reads use only `db_pntspst2.tt_kirim_barang`. Sales summaries exclude sources marked `central`; network restock uses an explicitly marked Pusat source for stock and the configured shipment source for OPEN movements.
 
+## Chat attachment upload logs
+
+Chat attachment uploads emit structured log entries under `AgentAttachmentUpload` to the backend process output, including in production. Each upload has a generated `requestId`, also returned in the `X-Request-Id` response header. Filter the process logs by that ID to follow one upload.
+
+- `upload_received`: the request reached the backend, before authentication/role checks.
+- `upload_stage`: the current operation, such as `multipart`, `read_file`, `session_access`, `parse_pdf`, `gridfs_upload`, or `save_metadata`.
+- `upload_failed`: the failed operation with its error name, message, code, stack locations, and original cause when available. Validation failures without an underlying exception use warning level; failures with an underlying exception and unexpected/storage failures use error level.
+- `upload_cleanup_failed`: an additional error while removing a partially stored file.
+- `upload_saved` and `upload_response`: successful storage and the final HTTP status/duration.
+
+Log fields exclude file contents and request headers. Diagnostic messages redact original filenames, owner/session IDs, database command details, connection URLs, and credentials, and are limited in length. Unexpected failures return a generic 500 response without exposing diagnostics to the browser. If there is no `upload_received` entry for an attempted upload, check the proxy/server in front of this backend and confirm the updated backend is running.
+
+After deploying, build and restart the backend, then reproduce the failed upload while viewing its process logs (for example, `pm2 logs <backend-process-name>` or `docker logs -f <backend-container>`). No frontend build is required for this logging change. Run `npm run test:agent-uploads` for isolated upload/error fixtures without connecting to a live database.
+
 ## Current limits
 
 - Shipment reads are grouped by `no_kirim`; source unit, weight, and date semantics are not inferred beyond the supplied guide.

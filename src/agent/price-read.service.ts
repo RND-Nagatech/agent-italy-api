@@ -87,7 +87,7 @@ export class PriceReadService {
     };
     try {
       const result = await this.references.scope({ sessionId: owned.sessionId.toHexString(), attachmentIds: [owned.attachmentId], prompt: 'Baca file acuan harga' }, owned.ownerId, progress);
-      await this.jobs.updateOne(guard, { $set: { status: 'complete', handled: result.handled, message: result.handled ? 'File harga penjualan/buyback selesai dibaca' : 'Gunakan file harga penjualan atau buyback perhiasan', updatedAt: new Date() }, $unset: { leaseToken: '', leaseUntil: '' } });
+      await this.jobs.updateOne(guard, { $set: { status: 'complete', handled: result.handled, message: result.handled ? 'File harga penjualan/buyback selesai dibaca' : 'Gunakan file harga penjualan perhiasan atau buyback perhiasan/logam mulia', updatedAt: new Date() }, $unset: { leaseToken: '', leaseUntil: '' } });
     } catch (error) {
       const message = error instanceof HttpException ? error.message : 'File belum dapat dibaca. Coba lagi tanpa mengunggah ulang.';
       await this.jobs.updateOne(guard, { $set: { status: 'error', message, updatedAt: new Date() }, $unset: { leaseToken: '', leaseUntil: '' } });

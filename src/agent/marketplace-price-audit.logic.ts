@@ -1,5 +1,5 @@
 import { auditPriceTransaction, type AuditTransaction, type PriceAuditRow, type PriceReference } from './price-audit.logic';
-import { headerSchedule, priceReferenceParts } from './price-reference-periods';
+import { headerSchedule, inHeaderPeriod, priceReferenceParts } from './price-reference-periods';
 import { BUYBACK_STATUSES } from './buyback-audit.logic';
 import type { AgentResponseBlock } from './response-blocks';
 
@@ -63,7 +63,7 @@ export function auditMarketplacePrice(tx: AuditTransaction, references: PriceRef
   if (schedule.hasTimes) {
     if (!schedule.valid) return review(schedule.reason);
     if (!validTime(tx.time)) return review('Jam transaksi belum tersedia atau tidak valid; batch pada file yang memiliki jam berlaku belum dapat dipilih.');
-    const period = schedule.periods.find(period => tx.time.slice(0, 5) >= period.fromTime && tx.time.slice(0, 5) < period.toTime);
+    const period = schedule.periods.find(period => inHeaderPeriod(tx.time, period));
     if (!period) return review('Transaksi terjadi sebelum acuan harga pertama mulai berlaku.');
     const group = candidates.find(group => group.batch === period.batch)!;
     const selected = { ...base, batch: `Batch ${period.batch}`, batchStatus: 'Mengikuti jam transaksi', window: `${tx.date} ${period.fromTime}–${period.toTime} WIB` };

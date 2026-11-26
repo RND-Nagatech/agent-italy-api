@@ -15,6 +15,8 @@ import { buybackReportTable } from './buyback-report.logic';
 import { headerSchedule, priceReferenceParts } from './price-reference-periods';
 import { LegacyBarangService, type LegacyBarangLookup, type LegacyBarangMatch } from '../database/legacy-barang.service';
 import { invoiceAuthorization, readAboveNoteBuybackAuthorizations, readBelowCostAuthorizations } from './marketplace-authorization';
+import { auditBullionBuyback, BULLION_GROUPS, bullionBuybackReportTable, type BullionAuditRow, type BullionTransaction } from './bullion-buyback.logic';
+import { auditBullionMarketplace, bullionMarketplaceReportTable, type BullionMarketplaceRow } from './bullion-marketplace.logic';
 
 const number = (value: unknown): number | null => {
   if (typeof value === 'number') return Number.isFinite(value) ? value : null;
@@ -51,7 +53,7 @@ export function priceAuditTransaction(row: Document, kind: 'sales' | 'buyback', 
   };
 }
 
-export function priceAuditDetails(row: Document, kind: 'sales' | 'buyback'): Document[] {
+export function priceAuditDetails(row: Document, kind: 'sales' | 'buyback', includeBullion = false): Document[] {
   if (kind === 'buyback' && row.status_valid === 'CANC') return [];
   if (!Array.isArray(row.detail_barang)) return [row];
   return row.detail_barang.flatMap((detail: unknown, index: number) => {
@@ -59,7 +61,8 @@ export function priceAuditDetails(row: Document, kind: 'sales' | 'buyback'): Doc
     const item = detail as Document;
     if (kind === 'sales' ? item.status_valid !== undefined && item.status_valid !== 'DONE' : item.status_valid === 'CANC') return [];
     if (kind === 'sales' && ((item.status_kembali !== undefined && item.status_kembali !== 'OPEN') || item.status_tukar === true || item.trs_barang_tukar === true)) return [];
-    if (/^LM/i.test(String(item.kode_dept ?? '')) || ['LAINNYA', 'PACKING', 'PLASTIK'].includes(String(item.kode_dept ?? '')) || item.kode_group === 'ACC') return [];
+    if (!includeBullion && (/^LM/i.test(String(item.kode_dept ?? '')) || BULLION_GROUPS.includes(item.kode_group))) return [];
+    if (['LAINNYA', 'PACKING', 'PLASTIK'].includes(String(item.kode_dept ?? '')) || item.kode_group === 'ACC') return [];
     // Item prices and identity must never be inherited from a grouped header.
     // lebih_bayar remains group-level metadata; detail values take precedence.
     const { detail_barang: _details, barang: _barang, kadar: _kadar, kode_barcode: _barcode, berat: _berat, harga_jual: _sale, harga: _purchase, harga_nota: _invoice, harga_gram: _perGram, harga_rata: _average, kode_intern: _internal, kadar_cetak: _printed, kondisi: _condition, tipe_kondisi: _conditionType, ongkos: _fee, qty: _qty, ...header } = row;
@@ -184,12 +187,15 @@ export class PriceAuditService {
     if (invalid) throw new BadRequestException(invalid);
     if (!sources.length) throw new BadRequestException('Belum ada toko terdaftar yang dapat diperiksa.');
     const references = await this.references.read(sessionId, ownerId, [...new Set(dto.windows.flatMap(w => w.attachmentIds))]);
-    const hasSales = references.some(ref => ref.rows.some(rule => rule.kind === 'sales'));
-    const hasBuyback = references.some(ref => ref.rows.some(rule => rule.kind === 'buyback'));
-    const autoBatch = hasBuyback && (dto.buybackAutoBatch === true || priceReferenceParts(references).some(ref => ref.effectiveFrom && ref.rows.some(row => row.kind === 'buyback')));
+    const hasSales = references.some(ref => ref.rows.some(rule => rule.kind === 'sales' && rule.family !== 'bullion'));
+    const hasBullionSales = references.some(ref => ref.rows.some(rule => rule.kind === 'sales' && rule.family === 'bullion'));
+    const hasBuyback = references.some(ref => ref.rows.some(rule => rule.kind === 'buyback' && rule.family !== 'bullion'));
+    const hasBullion = references.some(ref => ref.rows.some(rule => rule.kind === 'buyback' && rule.family === 'bullion'));
+    const jewelryReferences = priceReferenceParts(references).map(ref => ({ ...ref, rows: ref.rows.filter(rule => rule.family !== 'bullion') })).filter(ref => ref.rows.length);
+    const autoBatch = hasBuyback && (dto.buybackAutoBatch === true || jewelryReferences.some(ref => ref.effectiveFrom && ref.rows.some(row => row.kind === 'buyback')));
     const autoSales = hasSales && (dto.salesAutoBatch === true || dto.salesMarketplaceOnly === true);
-    const marketplaceOnly = hasSales && dto.salesMarketplaceOnly === true;
-    if (!hasSales && !hasBuyback) throw new BadRequestException('Tidak ada tarif penjualan/buyback yang dapat diperiksa.');
+    const marketplaceOnly = (hasSales || hasBullionSales) && dto.salesMarketplaceOnly === true;
+    if (!hasSales && !hasBuyback && !hasBullion && !hasBullionSales) throw new BadRequestException('Tidak ada tarif penjualan/buyback yang dapat diperiksa.');
     const edited = new Set<string>();
     for (const override of dto.kadarOverrides ?? []) {
       const reference = references.find(ref => ref.id === override.referenceId);
@@ -205,6 +211,8 @@ export class PriceAuditService {
     const dates = [...new Set(dto.windows.map(w => w.date))];
     const rows: PriceAuditRow[] = [];
     const buybackRows: BuybackAuditRow[] = [];
+    const bullionRows: BullionAuditRow[] = [];
+    const bullionSalesRows: BullionMarketplaceRow[] = [];
     const warnings: string[] = [];
     const usedSources: Array<{ alias: string; branchId: string }> = [];
     let scanned = 0;
@@ -220,7 +228,7 @@ export class PriceAuditService {
         try {
           if (!await db.listCollections({ name: collection }, { nameOnly: true }).hasNext()) throw new Error('missing collection');
           const marketplaceMatch = { $exists: true, $nin: ['-', '', null] };
-          const query = { ...validSalesMatch(), tgl_system: { $in: dates }, kode_dept: { $not: /^LM/i, $nin: ['LAINNYA', 'PACKING', 'PLASTIK'] }, kode_group: { $ne: 'ACC' },
+          const query = { ...validSalesMatch(), tgl_system: { $in: dates }, kode_dept: { $not: /^LM/i, $nin: ['LAINNYA', 'PACKING', 'PLASTIK'] }, kode_group: { $ne: 'ACC', $nin: [...BULLION_GROUPS] },
             ...(marketplaceOnly ? { $or: [{ kode_marketplace: marketplaceMatch }, { 'detail_barang.kode_marketplace': marketplaceMatch }] } : {}) };
           const fields = ['_id', 'tgl_system', 'jam', 'no_faktur_jual', 'no_faktur_group_user', 'kode_marketplace', 'nama_barang', 'kode_barcode', 'barang.kadar', 'kadar', 'kadar_cetak', 'berat', 'harga_jual', 'harga_gram', 'ongkos', 'lebih_bayar', 'qty', 'input_by', 'status_valid', 'status_kembali', 'status_tukar', 'trs_barang_tukar', 'kode_dept', 'kode_group'];
           const projection = Object.fromEntries(fields.flatMap(field => [[field, 1], [`detail_barang.${field}`, 1]]));
@@ -275,13 +283,39 @@ export class PriceAuditService {
           warnings.push(`${source.alias}: penjualan gagal dibaca. Hasil tidak dianggap lengkap.`);
         }
       }
+      if (hasBullionSales) {
+        const db=this.mongo.getDatabase(source.databaseName),sourceRows:BullionMarketplaceRow[]=[];
+        try {
+          if(!await db.listCollections({name:'tt_jual_detail'},{nameOnly:true}).hasNext())throw new Error('missing collection');
+          const marketplaceMatch={$exists:true,$nin:['-','',null]};
+          const query={...validSalesMatch(),tgl_system:{$in:dates},$and:[{$or:[{kode_group:{$in:[...BULLION_GROUPS]}},{'detail_barang.kode_group':{$in:[...BULLION_GROUPS]}}]},{$or:[{kode_marketplace:marketplaceMatch},{'detail_barang.kode_marketplace':marketplaceMatch}]}]};
+          const fields=['_id','tgl_system','jam','no_faktur_jual','no_faktur_group_user','kode_marketplace','kode_barcode','nama_barang','kode_group','kode_dept','berat','harga_jual','harga_gram','ongkos','lebih_bayar','qty','input_by','status_valid','status_kembali','status_tukar','trs_barang_tukar'];
+          const projection=Object.fromEntries(fields.flatMap(field=>[[field,1],[`detail_barang.${field}`,1]]));
+          const cursor=db.collection('tt_jual_detail').find(query,{projection}).maxTimeMS(20000).batchSize(500),batch:Document[]=[];
+          const flush=async()=>{
+            const items:BullionTransaction[]=[];
+            for(const document of batch.splice(0))for(const record of priceAuditDetails(document,'sales',true)){
+              if(!BULLION_GROUPS.includes(record.kode_group)||record.status_valid!=='DONE'||record.status_kembali!=='OPEN'||record.status_tukar===true||record.trs_barang_tukar===true)continue;
+              if(++scanned>25000)throw new BadRequestException('Lebih dari 25.000 transaksi pada tanggal pilihan. Kurangi tanggal agar seluruh data dapat diperiksa; hasil tidak dipotong.');
+              const tx={...priceAuditTransaction(record,'sales',source.alias),group:String(record.kode_group)};
+              if(!tx.marketplace||['-','ALL','SEMUA'].includes(tx.marketplace.toUpperCase())||/\b(?:perak|silver|packing|plastik\s*bening)\b/i.test(tx.name))continue;
+              if(!references.some(ref=>ref.date===tx.date&&ref.rows.some(rule=>rule.family==='bullion'&&rule.kind==='sales')))continue;
+              items.push(tx);
+            }
+            const authorizations=await readBelowCostAuthorizations(db,items.map(tx=>tx.invoice));
+            for(const tx of items){tx.belowCostAuthorization=invoiceAuthorization([tx.invoice],authorizations);sourceRows.push(auditBullionMarketplace(tx,references,'per-gram',dto.toleranceRp??0));}
+          };
+          try{for await(const document of cursor){batch.push(document);if(batch.length>=200)await flush();}if(batch.length)await flush();}finally{await cursor.close();}
+          bullionSalesRows.push(...sourceRows);available=true;
+        }catch(error){if(error instanceof BadRequestException)throw error;warnings.push(`${source.alias}: penjualan marketplace logam mulia gagal dibaca. Hasil tidak dianggap lengkap.`);}
+      }
       if (hasBuyback) {
         const db = this.mongo.getDatabase(source.databaseName);
         const cache = masterCache;
         const sourceRows: BuybackAuditRow[] = [];
         try {
           if (!await db.listCollections({ name: 'tt_beli_detail' }, { nameOnly: true }).hasNext()) throw new Error('missing collection');
-          const query = { tgl_system: { $in: dates }, status_valid: { $ne: 'CANC' }, kode_dept: { $not: /^LM/i, $nin: ['LAINNYA', 'PACKING', 'PLASTIK'] }, kode_group: { $ne: 'ACC' } };
+          const query = { tgl_system: { $in: dates }, status_valid: { $ne: 'CANC' }, kode_dept: { $not: /^LM/i, $nin: ['LAINNYA', 'PACKING', 'PLASTIK'] }, kode_group: { $ne: 'ACC', $nin: [...BULLION_GROUPS] } };
           const fields = ['_id', 'tgl_system', 'jam', 'no_faktur_beli', 'nama_barang', 'kode_barcode', 'kadar', 'kadar_cetak', 'berat', 'harga', 'harga_nota', 'harga_rata', 'kondisi', 'input_by', 'status_valid', 'kode_dept', 'kode_group'];
           const projection = Object.fromEntries(fields.flatMap(field => [[field, 1], [`detail_barang.${field}`, 1]]));
           const cursor = db.collection('tt_beli_detail').find(query, { projection }).maxTimeMS(20000).batchSize(500);
@@ -291,7 +325,7 @@ export class PriceAuditService {
             for (const document of batch.splice(0)) for (const record of priceAuditDetails(document, 'buyback')) {
               if (++scanned > 25000) throw new BadRequestException('Lebih dari 25.000 transaksi pada tanggal pilihan. Kurangi tanggal agar seluruh data dapat diperiksa; hasil tidak dipotong.');
               const tx = buybackAuditTransaction(record, source.alias);
-              if (/\b(?:antam|perak|silver|bullion|logam\s+mulia)\b/i.test(tx.name)) continue;
+              if (BULLION_GROUPS.includes(record.kode_group) || /\b(?:antam|perak|silver|bullion|logam\s+mulia)\b/i.test(tx.name)) continue;
               if (autoBatch) {
                 if (!references.some(ref => ref.date === tx.date && ref.rows.some(rule => rule.kind === 'buyback'))) continue;
               } else {
@@ -305,9 +339,9 @@ export class PriceAuditService {
             const authorizations = await readAboveNoteBuybackAuthorizations(db, items.map(({ tx }) => tx.invoice));
             for (const { tx } of items) tx.aboveNoteAuthorization = invoiceAuthorization([tx.invoice], authorizations, 'pembelian di atas nota');
             for (const { tx } of items) {
-              if (autoBatch) { sourceRows.push(auditBuybackBatches(tx, references)); continue; }
+              if (autoBatch) { sourceRows.push(auditBuybackBatches(tx, jewelryReferences)); continue; }
               const window = dto.windows.find(w => w.date === tx.date && tx.time.slice(0, 5) >= w.fromTime && tx.time.slice(0, 5) < w.toTime);
-              sourceRows.push(auditBuybackTransaction(tx, window, window ? references.filter(ref => window.attachmentIds.includes(ref.id)) : []));
+              sourceRows.push(auditBuybackTransaction(tx, window, window ? jewelryReferences.filter(ref => window.attachmentIds.includes(ref.id) || window.attachmentIds.some(id => ref.id.startsWith(`${id}#`))) : []));
             }
           };
           try { for await (const record of cursor) { batch.push(record); if (batch.length >= 200) await flush(); } if (batch.length) await flush(); }
@@ -318,15 +352,54 @@ export class PriceAuditService {
           warnings.push(`${source.alias}: pembelian/buyback gagal dibaca. Hasil tidak dianggap lengkap.`);
         }
       }
+      if (hasBullion) {
+        const db = this.mongo.getDatabase(source.databaseName), sourceRows: BullionAuditRow[] = [];
+        try {
+          if (!await db.listCollections({ name: 'tt_beli_detail' }, { nameOnly: true }).hasNext()) throw new Error('missing collection');
+          const query = { tgl_system: { $in: dates }, status_valid: { $ne: 'CANC' }, $or: [{ kode_group: { $in: [...BULLION_GROUPS] } }, { 'detail_barang.kode_group': { $in: [...BULLION_GROUPS] } }] };
+          const fields = ['_id','tgl_system','jam','no_faktur_beli','nama_barang','kode_barcode','kode_group','kode_dept','berat','harga','harga_nota','harga_rata','kondisi','input_by','status_valid'];
+          const projection = Object.fromEntries(fields.flatMap(field => [[field,1],[`detail_barang.${field}`,1]]));
+          const cursor = db.collection('tt_beli_detail').find(query,{projection}).maxTimeMS(20000).batchSize(500);
+          const batch: Document[] = [];
+          const flush = async () => {
+            const items: BullionTransaction[] = [];
+            for (const document of batch.splice(0)) for (const record of priceAuditDetails(document,'buyback',true)) {
+              if (!BULLION_GROUPS.includes(record.kode_group)) continue;
+              if (++scanned > 25000) throw new BadRequestException('Lebih dari 25.000 transaksi pada tanggal pilihan. Kurangi tanggal agar seluruh data dapat diperiksa; hasil tidak dipotong.');
+              const tx = { ...priceAuditTransaction(record,'buyback',source.alias), group: String(record.kode_group) };
+              if (/\b(?:perak|silver)\b/i.test(tx.name)) continue;
+              if (!references.some(ref => ref.date === tx.date && ref.rows.some(rule => rule.kind === 'buyback' && rule.family === 'bullion'))) continue;
+              items.push(tx);
+            }
+            const authorizations = await readAboveNoteBuybackAuthorizations(db,items.map(tx=>tx.invoice));
+            for (const tx of items) {
+              tx.aboveNoteAuthorization = invoiceAuthorization([tx.invoice],authorizations,'pembelian di atas nota');
+              sourceRows.push(auditBullionBuyback(tx,references));
+            }
+          };
+          try { for await (const record of cursor) { batch.push(record); if(batch.length>=200) await flush(); } if(batch.length) await flush(); }
+          finally { await cursor.close(); }
+          bullionRows.push(...sourceRows); available = true;
+        } catch(error) {
+          if(error instanceof BadRequestException) throw error;
+          warnings.push(`${source.alias}: buyback logam mulia gagal dibaca. Hasil tidak dianggap lengkap.`);
+        }
+      }
       if (available) usedSources.push({ alias: source.alias, branchId: source.branchId });
     }
     rows.sort((a, b) => `${a.date} ${a.time} ${a.store} ${a.invoice}`.localeCompare(`${b.date} ${b.time} ${b.store} ${b.invoice}`));
     buybackRows.sort((a, b) => `${a.date} ${a.time} ${a.store} ${a.invoice}`.localeCompare(`${b.date} ${b.time} ${b.store} ${b.invoice}`));
+    bullionRows.sort((a,b)=>`${a.date} ${a.time} ${a.store} ${a.invoice}`.localeCompare(`${b.date} ${b.time} ${b.store} ${b.invoice}`));
+    bullionSalesRows.sort((a,b)=>`${a.date} ${a.time} ${a.store} ${a.invoice}`.localeCompare(`${b.date} ${b.time} ${b.store} ${b.invoice}`));
     const blocks: AgentResponseBlock[] = [
-      { type: 'text', variant: 'heading', text: `Pemeriksaan harga ${hasSales && hasBuyback ? `${marketplaceOnly ? 'marketplace' : 'penjualan'} dan buyback` : hasBuyback ? 'buyback' : marketplaceOnly ? 'marketplace' : 'penjualan'} perhiasan` },
-      { type: 'text', variant: 'muted', text: `Seluruh ${sources.length} toko terdaftar sesuai hak akses. ${autoBatch || autoSales || marketplaceOnly ? 'Transaksi diperiksa sehari penuh mengikuti tanggal dan batch pada header file, tanpa pilihan jam.' : `${dto.windows.length} acuan waktu WIB.`} ${marketplaceOnly ? 'Penjualan dibatasi ke barang pada transaksi marketplace yang masih berlaku. ' : ''}Jenis transaksi mengikuti file acuan. Antam/logam mulia/perak tidak termasuk. Transaksi buyback CANC dikeluarkan.` },
+      { type: 'text', variant: 'heading', text: `Pemeriksaan harga ${[hasSales ? marketplaceOnly ? 'marketplace perhiasan' : 'penjualan perhiasan' : '',hasBullionSales?'marketplace logam mulia':'',hasBuyback ? 'buyback perhiasan' : '',hasBullion ? 'buyback logam mulia' : ''].filter(Boolean).join(' dan ')}` },
+      { type: 'text', variant: 'muted', text: `Seluruh ${sources.length} toko terdaftar sesuai hak akses. ${autoBatch || autoSales || marketplaceOnly || hasBullion || hasBullionSales ? 'Transaksi diperiksa sehari penuh mengikuti tanggal dan batch pada header file, tanpa pilihan jam.' : `${dto.windows.length} acuan waktu WIB.`} ${marketplaceOnly || hasBullionSales ? 'Penjualan dibatasi ke barang pada transaksi marketplace yang masih berlaku. ' : ''}Jenis transaksi mengikuti file acuan. ${hasBullion || hasBullionSales ? 'Logam mulia diperiksa pada grup LM/LMM.' : 'Antam/logam mulia tidak termasuk tanpa file acuannya.'} Perak tidak termasuk. Transaksi buyback CANC dikeluarkan.` },
       ...(hasSales ? (['Cocok', 'Tidak cocok', 'Belum dapat diperiksa'] as const).map(status => ({ type: 'metric' as const, label: marketplaceOnly ? marketplaceStatusLabel(status) : status, value: rows.filter(row => row.status === status).length, unit: 'penjualan', tone: status === 'Cocok' ? 'teal' as const : 'amber' as const })) : []),
       ...(hasBuyback ? BUYBACK_STATUSES.map(status => ({ type: 'metric' as const, label: status, value: buybackRows.filter(row => row.status === status).length, unit: 'buyback', tone: status === BUYBACK_STATUSES[0] ? 'teal' as const : 'amber' as const })) : []),
+      ...(hasBullion ? BUYBACK_STATUSES.map(status=>({type:'metric' as const,label:status,value:bullionRows.filter(row=>row.status===status).length,unit:'buyback LM',tone:status===BUYBACK_STATUSES[0]?'teal' as const:'amber' as const})) : []),
+      ...(hasBullionSales?BUYBACK_STATUSES.map(status=>({type:'metric' as const,label:status,value:bullionSalesRows.filter(row=>row.status===status).length,unit:'penjualan LM marketplace',tone:status===BUYBACK_STATUSES[0]?'teal' as const:'amber' as const})):[]),
+      ...(hasBullionSales?[{type:'text' as const,variant:'muted' as const,text:'Marketplace logam mulia memakai grup LM/LMM dan nama barang yang sudah didekripsi. Nama produk khusus mengikuti kategori pada file; kategori, tahun dan berat menentukan tarif. Harga diperiksa pada harga_gram. Acuan per piece ditampilkan sesuai file dan dikonversi berdasarkan berat untuk perbandingan harga_gram. Jam pada file penjualan menentukan batch; harga buyback tidak dipakai. Otorisasi faktur serta pengembalian kelebihan pembayaran tetap ditampilkan.'}]:[]),
+      ...(hasBullion ? [{type:'text' as const,variant:'muted' as const,text:'Buyback logam mulia memakai nama barang yang sudah didekripsi, kategori/tahun dan berat barang. Tahun Antam didahulukan dari Redmark/Retro; Antam tanpa tahun atau varian memakai acuan 2026. EMASKU dan LM selain Antam memakai kategorinya sendiri. Harga rata transaksi dibandingkan langsung dengan tarif pada file, tanpa potongan atau perhitungan ulang. Jam berlaku pada file menentukan batch. Otorisasi faktur ditampilkan terpisah.'}] : []),
       ...(hasSales ? [{ type: 'text' as const, variant: 'muted' as const, text: marketplaceOnly
         ? `Harga per gram marketplace diperiksa per barang berdasarkan kadar pada faktur. Jika kadar belum tersedia, barcode dipakai untuk mencari kadar barang. Acuan dan selisih ditampilkan terpisah untuk setiap batch, termasuk saat harga berbeda dari seluruh acuan atau batch belum dapat ditentukan. Selisih negatif berarti harga transaksi lebih rendah dari acuan; selisih positif berarti lebih tinggi. Ongkos dan biaya marketplace dipisahkan dari harga emas. Pengembalian kelebihan pembayaran berlaku per grup faktur; nominal yang berulang pada beberapa barang tidak dijumlahkan per barang. Jika file memiliki jam berlaku, jam transaksi menentukan batch. File tanpa jam dicocokkan berdasarkan kadar dan harga; batch yang belum tunggal ditandai untuk diperhatikan. Toleransi harga: Rp${dto.toleranceRp ?? 0}.`
         : `Harga penjualan per gram dibandingkan langsung dengan gambar dan kadar barang diverifikasi. Kode intern master menentukan kode acuan; batch ditentukan dari kecocokan kode dan harga_gram, lalu ongkos diperiksa terpisah. Ongkos memakai berat dibulatkan ke gram utuh: 1,71 gram → 2 gram × Rp20.000 = Rp40.000. Toleransi tambahan penjualan: Rp${dto.toleranceRp ?? 0}.` }] : []),
@@ -337,17 +410,17 @@ export class PriceAuditService {
     const referenceWarnings = references.flatMap(ref => ref.warnings.map(w => `${ref.filename}: ${w}`));
     if (referenceWarnings.length) blocks.push({ type: 'callout', tone: 'warning', title: 'Catatan pembacaan acuan', text: referenceWarnings.join(' ').slice(0, 8000) });
     blocks.push({ type: 'table', title: 'Daftar acuan pemeriksaan harga', columns: ['Tanggal', 'Jam mulai WIB', 'Jam selesai WIB', 'File', 'Tanggal file', 'Tarif terbaca', 'Pembacaan', 'Pemetaan kadar oleh pengguna'], rows: dto.windows.flatMap(w => w.attachmentIds.map(id => { const ref = references.find(r => r.id === id)!; const manual = (dto.kadarOverrides ?? []).filter(o => o.referenceId === id).map(o => `Baris ${o.rowIndex + 1}: ${o.kadar}`).join('; '); return [w.date, w.fromTime, w.toTime, ref.filename, ref.date, ref.rows.length, ref.complete ? 'Lengkap' : 'Perlu diperiksa', manual || '—']; })) });
-    if (autoBatch || autoSales) {
+    if (autoBatch || autoSales || hasBullion || hasBullionSales) {
       const index = blocks.findIndex(block => block.type === 'table' && block.title === 'Daftar acuan pemeriksaan harga');
       const parts = priceReferenceParts(references);
       blocks[index] = { type: 'table', title: 'Daftar acuan pemeriksaan harga', columns: ['Tanggal', 'Batch', 'Jenis Acuan', 'Kelompok Emas', 'File', 'Tarif Terbaca', 'Pembacaan'],
-        rows: parts.map(ref => [ref.date, ref.batch ? `Batch ${ref.batch}` : 'Belum terbaca', [...new Set(ref.rows.map(rule => rule.kind === 'sales' ? 'Penjualan' : 'Buyback'))].join(', '), [...new Set(ref.rows.map(rule => rule.family === 'young' ? 'Emas muda 8K/9K' : 'Emas tua'))].join(', '), ref.filename, ref.rows.length, ref.complete ? 'Lengkap' : 'Perlu diperiksa']) };
-      if (hasBuyback && parts.some(ref => ref.rows.some(rule => rule.kind === 'buyback') && ref.effectiveFrom)) {
+        rows: parts.map(ref => [ref.date, ref.batch ? `Batch ${ref.batch}` : 'Belum terbaca', [...new Set(ref.rows.map(rule => rule.kind === 'sales' ? 'Penjualan' : 'Buyback'))].join(', '), [...new Set(ref.rows.map(rule => rule.family === 'young' ? 'Emas muda 8K/9K' : rule.family === 'bullion' ? 'Logam mulia' : 'Emas tua'))].join(', '), ref.filename, ref.rows.length, ref.complete ? 'Lengkap' : 'Perlu diperiksa']) };
+      if ((hasBuyback || hasBullion || hasSales || hasBullionSales) && parts.some(ref => ref.effectiveFrom)) {
         const table = blocks[index] as Extract<AgentResponseBlock, { type: 'table' }>;
         table.columns.splice(2, 0, 'Berlaku Mulai WIB', 'Berlaku Sampai WIB');
         table.rows.forEach((row, rowIndex) => {
           const ref = parts[rowIndex];
-          const period = ref.rows.some(rule => rule.kind === 'buyback') ? headerSchedule(references, ref.date).periods.find(item => item.batch === ref.batch) : undefined;
+          const period = headerSchedule(references, ref.date, ref.rows[0].kind, [ref.rows[0].family]).periods.find(item => item.batch === ref.batch);
           row.splice(2, 0, ref.effectiveFrom || 'Tidak tercantum', period ? period.toTime === '24:00' ? 'Akhir hari' : `Sebelum ${period.toTime}` : 'Belum dapat ditentukan');
         });
       }
@@ -357,11 +430,13 @@ export class PriceAuditService {
       const salesTable = blocks.findIndex(block => block.type === 'table' && block.title === 'Audit harga penjualan perhiasan');
       if (salesTable >= 0) blocks.splice(salesTable, 1);
     }
-    if (marketplaceOnly) {
+    if (marketplaceOnly && hasSales) {
       const salesTable = blocks.findIndex(block => block.type === 'table' && block.title === 'Audit harga penjualan perhiasan');
       blocks[salesTable] = marketplacePriceReportTable(rows, references);
     }
-    if (hasBuyback) blocks.push(buybackReportTable(buybackRows, references, autoBatch));
+    if (hasBuyback) blocks.push(buybackReportTable(buybackRows, jewelryReferences, autoBatch));
+    if (hasBullion) blocks.push(bullionBuybackReportTable(bullionRows,references));
+    if(hasBullionSales)blocks.push(bullionMarketplaceReportTable(bullionSalesRows,references,'per-gram'));
     if (Buffer.byteLength(JSON.stringify(blocks), 'utf8') > 10 * 1024 * 1024) throw new BadRequestException('Laporan terlalu besar. Kurangi rentang tanggal; tidak ada transaksi yang dipotong diam-diam.');
     return { blocks, usedSources };
   }

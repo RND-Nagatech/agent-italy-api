@@ -63,7 +63,7 @@ function explanation(row: BuybackAuditRow, evaluations: BuybackBatchEvaluation[]
 
 /** One readable comparison per transaction, shared by the table view and Excel. */
 export function buybackReportTable(rows: BuybackAuditRow[], references: PriceReference[], autoBatch: boolean): Extract<AgentResponseBlock, { type: 'table' }> {
-  const buybackRefs = priceReferenceParts(references).filter(ref => ref.rows.some(rule => rule.kind === 'buyback'));
+  const buybackRefs = priceReferenceParts(references).filter(ref => ref.rows.some(rule => rule.kind === 'buyback' && rule.family !== 'bullion'));
   const timed = autoBatch && buybackRefs.some(ref => Boolean(ref.effectiveFrom));
   const batches = [...new Set(buybackRefs.map(ref => ref.batch ?? null))].sort((a, b) => (a ?? Infinity) - (b ?? Infinity));
   const rangeColumns = autoBatch ? batches.map(batch => batch === null ? 'Range file tanpa nomor batch (IDR/gram)' : `Range Batch ${batch} (IDR/gram)`) : ['Range acuan (IDR/gram)'];

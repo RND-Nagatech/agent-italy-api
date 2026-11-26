@@ -1,5 +1,5 @@
 import type { AuditTransaction, PriceReference, PriceRule, PriceWindow } from './price-audit.logic';
-import { headerSchedule, priceReferenceParts } from './price-reference-periods';
+import { headerSchedule, inHeaderPeriod, priceReferenceParts } from './price-reference-periods';
 import { buybackIdentity, matchesBuybackIdentity } from './buyback-identity.logic';
 export { buybackCode } from './buyback-identity.logic';
 
@@ -34,11 +34,11 @@ export function auditBuybackTransaction(tx: BuybackTransaction, window: PriceWin
   const observed = actual !== null && Number.isFinite(actual) ? `Harga rata transaksi ${idr(actual)}/gram.` : 'Harga rata transaksi belum tersedia/valid.';
   const review = (reason: string) => ({ ...result, reason: `${reason} ${observed}` });
   if (!window || (!fullDay && !/^([01]\d|2[0-3]):[0-5]\d:[0-5]\d$/.test(tx.time))) return review('Jam transaksi tidak tersedia/valid; acuan waktu belum dapat ditentukan.');
-  if (tx.date !== window.date || (!fullDay && (tx.time.slice(0, 5) < window.fromTime || tx.time.slice(0, 5) >= window.toTime))) return review('Transaksi berada di luar tanggal/jam acuan.');
+  if (tx.date !== window.date || (!fullDay && !inHeaderPeriod(tx.time, window))) return review('Transaksi berada di luar tanggal/jam acuan.');
   if (tx.lookupNote || !result.code) return review(`${tx.lookupNote || (tx.internalCode && tx.internalCode !== '-' ? `Kode/label intern ${tx.internalCode} belum ditemukan pada file acuan.` : 'Kode internal barang tidak diketahui atau tidak dapat dibaca.')} Range acuan belum dapat ditentukan.`);
   if (!tx.condition.trim() || /^(?:[A-F0-9]{2})+$/i.test(tx.condition.trim())) return review('Kondisi transaksi kosong atau belum dapat didekripsi; kategori RUSAK/selain RUSAK belum dapat dipastikan.');
   const damaged = /RUSAK|ANCUR|HANCUR|RONGSOK/i.test(tx.condition);
-  let rules: Rule[] = references.flatMap(ref => ref.rows.filter(row => row.kind === 'buyback').map(row => ({ ...row, file: ref.filename, complete: ref.complete, group: `${ref.id}:${row.sourceRow ?? `${row.sourceCode}:${row.printedKadar ?? ''}`}` })));
+  let rules: Rule[] = references.flatMap(ref => ref.rows.filter(row => row.kind === 'buyback' && row.family !== 'bullion').map(row => ({ ...row, file: ref.filename, complete: ref.complete, group: `${ref.id}:${row.sourceRow ?? `${row.sourceCode}:${row.printedKadar ?? ''}`}` })));
   const codeRules = rules.filter(row => matchesBuybackIdentity(row, identity));
   if (!codeRules.length) return review(`Kode ${result.code} tidak ditemukan pada file buyback dalam acuan waktu ini.`);
   const families = new Set(codeRules.map(row => row.family));
@@ -110,8 +110,8 @@ export function auditBuybackTransaction(tx: BuybackTransaction, window: PriceWin
 
 /** Printed effective hours determine the batch first; files without hours use price compatibility. */
 export function auditBuybackBatches(tx: BuybackTransaction, references: PriceReference[]): BuybackAuditRow {
-  const dated = priceReferenceParts(references).filter(ref => ref.date === tx.date && ref.rows.some(row => row.kind === 'buyback'));
-  if (headerSchedule(dated, tx.date).hasTimes) return auditBuybackByHeaderTime(tx, dated);
+  const dated = priceReferenceParts(references).filter(ref => ref.date === tx.date && ref.rows.some(row => row.kind === 'buyback' && row.family !== 'bullion'));
+  if (headerSchedule(dated, tx.date, 'buyback', ['young','old']).hasTimes) return auditBuybackByHeaderTime(tx, dated);
   const day = { date: tx.date, fromTime: '00:00', toTime: '24:00', attachmentIds: dated.map(ref => ref.id) };
   const base = auditBuybackTransaction(tx, day, dated, true);
   const unresolved = (reason: string): BuybackAuditRow => ({ ...base, minimum: null, maximum: null, difference: null,
@@ -167,7 +167,7 @@ export function auditBuybackBatches(tx: BuybackTransaction, references: PriceRef
 }
 
 function auditBuybackByHeaderTime(tx: BuybackTransaction, references: PriceReference[]): BuybackAuditRow {
-  const schedule = headerSchedule(references, tx.date);
+  const schedule = headerSchedule(references, tx.date, 'buyback', ['young', 'old']);
   const day = { date: tx.date, fromTime: '00:00', toTime: '24:00', attachmentIds: references.map(ref => ref.id) };
   const base = auditBuybackTransaction(tx, day, references, true);
   const groups = new Map<string, PriceReference[]>();
@@ -185,7 +185,7 @@ function auditBuybackByHeaderTime(tx: BuybackTransaction, references: PriceRefer
     batchBasis: 'time', batchReason: reason, reason, batchEvaluations: evaluations });
   if (!schedule.valid) return review(schedule.reason);
   if (!/^(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d$/.test(tx.time)) return review('Jam transaksi tidak tersedia atau tidak valid; batch berdasarkan waktu belum dapat ditentukan.');
-  const period = schedule.periods.find(item => tx.time.slice(0, 5) >= item.fromTime && tx.time.slice(0, 5) < item.toTime);
+  const period = schedule.periods.find(item => inHeaderPeriod(tx.time, item));
   if (!period) return review(`Transaksi pukul ${tx.time} WIB terjadi sebelum acuan pertama berlaku pada ${schedule.periods[0].fromTime} WIB.`);
   const window = { date: tx.date, fromTime: period.fromTime, toTime: period.toTime, attachmentIds: period.refs.map(ref => ref.id) };
   const result = auditBuybackTransaction(tx, window, period.refs);

@@ -1,13 +1,18 @@
 export type PriceKind = 'sales' | 'buyback';
-export type PriceFamily = 'young' | 'old';
+export type PriceFamily = 'young' | 'old' | 'bullion';
+export type BullionProduct = 'ANTAM_YEAR' | 'ANTAM_REDMARK' | 'ANTAM_RETRO' | 'EMAS_KITA' | 'EMASKU' | 'UBS' | 'LOTUS_ARCHI' | 'NAMED_PRODUCT' | 'OTHER_LM';
+export type BullionPriceBasis = 'PER_GRAM' | 'PER_PIECE';
 export type PriceRule = {
   family: PriceFamily; kind: PriceKind; kadar: number | null; sourceCode: string;
   rate: number; maxRate: number | null; fee: number | null; feeType: 'nominal' | 'percent' | 'unknown';
   condition: 'ANY' | 'GOOD' | 'SCRAP' | 'STONE' | 'DAMAGED_8' | 'DAMAGED_9';
   note: string;
   sourceRow?: string; printedKadar?: string; sourceLabel?: string;
+  bullionProduct?: BullionProduct; bullionYear?: number | null; bullionWeightGram?: number | null;
+  bullionPriceBasis?: BullionPriceBasis;
 };
-export type PriceReferenceSection = { date: string; batch?: number | null; effectiveFrom?: string | null; complete: boolean; warnings: string[]; rows: PriceRule[] };
+export type UnavailableBullionPrice = { kind: PriceKind; product: BullionProduct; year: number | null; weightGram: number | null; priceBasis: BullionPriceBasis; sourceLabel: string };
+export type PriceReferenceSection = { date: string; batch?: number | null; effectiveFrom?: string | null; complete: boolean; warnings: string[]; rows: PriceRule[]; unavailableBullion?: UnavailableBullionPrice[] };
 export type PriceReference = PriceReferenceSection & { id: string; filename: string; sections?: PriceReferenceSection[] };
 export type PriceWindow = { date: string; fromTime: string; toTime: string; attachmentIds: string[] };
 export type AuditTransaction = {

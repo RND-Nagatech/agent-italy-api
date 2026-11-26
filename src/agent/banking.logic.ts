@@ -1,31 +1,17 @@
 import { env } from '../config/env';
+import { decryptLegacyAscii, encryptLegacyAscii } from '../config/legacy-ascii';
 import type { BankEntry, BankMatch, BankTransaction } from './banking.types';
 
 export function encryptBankField(value: string): string {
-  const key = env.encKeyDec;
-  if (!key) return value;
-  let result = '', cursor = 0;
-  for (const character of value) {
-    result += (character.charCodeAt(0) + key.charCodeAt(cursor)).toString(16);
-    if (cursor === key.length - 1) cursor = 0;
-    cursor += 1;
-  }
-  return result.toUpperCase();
+  return encryptLegacyAscii(value, env.encKeyDec);
 }
 
 export function decryptBankField(value: unknown): string {
   if (typeof value !== 'string') return '';
   const text = value.trim(), key = env.encKeyDec;
   if (!key || !/^(?:[0-9a-f]{2})+$/i.test(text)) return text;
-  let result = '', cursor = 0;
-  for (let index = 0; index < text.length; index += 2) {
-    const code = Number.parseInt(text.slice(index, index + 2), 16) - key.charCodeAt(cursor);
-    if (!Number.isFinite(code) || code < 0 || code > 0xffff) return text;
-    result += String.fromCharCode(code);
-    if (cursor === key.length - 1) cursor = 0;
-    cursor += 1;
-  }
-  if (!result.trim() || /[\u0000-\u001f\u007f-\u009f]/.test(result)) return text;
+  const result = decryptLegacyAscii(text, key);
+  if (!result || !result.trim() || /[\u0000-\u001f\u007f-\u009f]/.test(result)) return text;
   return encryptBankField(result) === text.toUpperCase() ? result.trim() : text;
 }
 

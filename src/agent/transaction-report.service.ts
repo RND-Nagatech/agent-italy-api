@@ -3,6 +3,7 @@ import { Document } from 'mongodb';
 import { env } from '../config/env';
 import { MongoService } from '../database/mongo.service';
 import { salesTransactionsPipeline } from './sales-transactions.pipeline';
+import { invoiceAuthorization, readBelowCostAuthorizations } from './marketplace-authorization';
 
 export type TransactionReportType =
   | 'sales'
@@ -64,6 +65,13 @@ export class TransactionReportService {
         const rawRows: Document[] = reportType === 'sales' ? aggregateRows[0]?.rows ?? [] : aggregateRows;
         const truncated = rawRows.length > MAX_REPORT_ROWS;
         const visibleRows = rawRows.slice(0, MAX_REPORT_ROWS).map((row) => normalizeReportRow(reportType, row));
+        if (reportType === 'online_marketplace_price') {
+          const invoicesFor = (row: Document): string[] => Array.isArray(row.detail)
+            ? row.detail.filter((detail: Document) => detail.jenis_detail === 'BARANG_UTAMA').map((detail: Document) => detail.no_faktur_jual)
+            : [row.no_faktur_utama];
+          const authorizations = await readBelowCostAuthorizations(db, visibleRows.flatMap(invoicesFor));
+          for (const row of visibleRows) row.belowCostAuthorization = invoiceAuthorization(invoicesFor(row), authorizations);
+        }
         return {
           alias: source.alias,
           branchId: source.branchId,

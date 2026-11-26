@@ -7,6 +7,8 @@ import { centralStockOffer, isProductCategoryAnswer } from './offered-stock-inte
 import { branchRestockPcsBlocks, networkRestockPcsBlocks, supplierOrderPcsBlocks } from './restock-pcs.blocks';
 import { BranchSalesService, BranchSalesArgs } from './branch-sales.service';
 import { allStoreSalesTodayQuery } from './sales-report-intent';
+import { resolveInventoryIntent } from './inventory-intent';
+import { applyAgentSourceScopeToToolArgs, resolveAgentSourceScope } from './source-scope';
 import { branchSalesTools } from './branch-sales.tools';
 import { compactBranchSales, branchSalesBlocks } from './branch-sales.blocks';
 import { MemoryLearningService } from '../knowledge/memory-learning.service';
@@ -17,6 +19,8 @@ import { atomicTools } from './atomic-tools';
 import { transactionReportTools } from './transaction-report.tools';
 import { TransactionReportService } from './transaction-report.service';
 import { BankingService } from './banking.service';
+import { PriceAuditService } from './price-audit.service';
+import { PriceReferenceService } from './price-reference.service';
 import { BankingScopeDto } from './dto/banking.dto';
 import type { TransactionReportArgs } from './transaction-report.service';
 import { transactionReportBlocks } from './transaction-report.blocks';
@@ -433,7 +437,8 @@ const systemPrompt = [
   'Kategori produk X, XB, dan B hanya dipilih dari penjelasan pengguna. Metadata kelompok cabang lama tidak tersedia sebagai kategori produk dan tidak boleh dipakai untuk menyimpulkan kelas barang. Untuk barang yang ditawarkan, gunakan productCategory terpisah dan tanyakan bila belum disebut.',
   'Untuk angka penjualan dari tt_jual_detail, gunakan status_kembali = OPEN dan status_valid = DONE; transaksi dengan status_tukar=true atau trs_barang_tukar=true dikecualikan. Agregasi umum ke collection ini dikunci backend dengan filter tersebut. Field berat ditafsirkan sebagai gram total per baris dan dijumlahkan langsung, tidak dikalikan qty. Untuk laporan penjualan, tampilkan gram dan rupiah. Khusus kebutuhan restock gunakan qty sebagai pcs melalui tool restock. Jika berat tidak tersedia, katakan berat tidak tercatat. Hitungan cabang, Jenis, dokumen, baris transaksi, dan rute boleh disebut bila relevan.',
   'Untuk membandingkan stok vs penjualan bulan berjalan, Jenis paling laku per cabang, atau cakupan stok, gunakan analyze_stock_vs_sales. Tool ini menghitung stok tm_barang sebagai berat × stock_on_hand, kiriman OPEN dari db_pntspst2 berdasarkan berat per baris, dan penjualan tt_jual_detail dari berat per baris dengan filter status yang berlaku serta pengecualian tukar. Cakupan dan peringkat Jenis dihitung berdasarkan gram, bukan jumlah barang. Ambang cakupan rendah berasal dari period.safeStockDays di Pengaturan. Jika baris sumber tidak memiliki berat positif, jelaskan bahwa total gram belum lengkap. Stok dan kiriman adalah informasi terpisah; jangan menyebut rekomendasi cakupan sebagai order. Untuk rincian, petakan alias cabang ke branchId dari list_data_sources dan sertakan branchId; gunakan jenisCode bila membandingkan satu Jenis lintas cabang. Untuk semua cabang, jelaskan bahwa highlight per cabang merangkum Jenis teratas dan Jenis dengan cakupan rendah, bukan seluruh matriks nol.',
-  'Untuk pertanyaan jumlah stok satu lokasi atau satu Jenis, gunakan get_current_stock. Jika pengguna menyebut Pusat, WAJIB isi sourceType=central; jika menyebut Cabang, petakan alias ke branchId dari list_data_sources dan isi branchIds tepat. Sertakan jenisCode jika kode Jenis disebut, misalnya CN. Untuk ringkasan Pusat dan seluruh cabang gunakan analyze_inventory_summary. Stok fisik tm_barang dihitung dalam pcs: utamakan stock_on_hand; hanya jika field itu null/tidak tersedia pada record, gunakan qty. Berat gram dihitung terpisah sebagai berat × pcs. Jawab pcs sebagai angka utama untuk pertanyaan jumlah stok; gram hanya informasi tambahan bila relevan. Record tanpa berat tetap dihitung pcs dan kekurangan berat dilaporkan terpisah. Filter status_hancur=false; deleted_by bukan filter. OPEN masuk bukan stok fisik dan tidak dicampurkan ke inventory. Sebutkan sumber gagal dibaca atau Jenis yang belum terdekripsi.',
+  'Untuk pertanyaan jumlah stok satu lokasi atau satu Jenis, gunakan get_current_stock. Jika pengguna menyebut Pusat, WAJIB isi sourceType=central; jika menyebut Cabang, petakan alias ke branchId dari list_data_sources dan isi branchIds tepat. Sertakan jenisCode jika kode Jenis disebut, misalnya CN. Untuk ringkasan Pusat dan seluruh cabang gunakan analyze_inventory_summary. Aturan scope wajib: "Italy" tanpa lokasi berarti semua sumber Italy yang diizinkan, bukan otomatis IT2; "Italy Pusat" atau "Pusat" berarti sumber dengan alias Pusat/branchId yang cocok; "Italy Otista" atau "Otista" berarti sumber dengan alias Otista/branchId yang cocok. Untuk pertanyaan stok umum tanpa Jenis spesifik, gunakan analyze_inventory_summary tanpa branchId agar semua sumber ikut diringkas. Stok fisik tm_barang dihitung dalam pcs: utamakan stock_on_hand; hanya jika field itu null/tidak tersedia pada record, gunakan qty. Berat gram dihitung terpisah sebagai berat × pcs. Jawab pcs sebagai angka utama untuk pertanyaan jumlah stok; gram hanya informasi tambahan bila relevan. Record tanpa berat tetap dihitung pcs dan kekurangan berat dilaporkan terpisah. Filter status_hancur=false; deleted_by bukan filter. OPEN masuk bukan stok fisik dan tidak dicampurkan ke inventory. Sebutkan sumber gagal dibaca atau Jenis yang belum terdekripsi.',
+  'Scope sumber wajib untuk semua laporan: "Italy", "di Italy", atau "untuk Italy" tanpa lokasi spesifik berarti semua sumber aktif yang diizinkan; jangan memilih IT2 sebagai default. "Italy Otista"/"Otista" berarti IT2, "Italy Pusat"/"Pusat" berarti ITY, dan jika beberapa lokasi disebutkan gunakan seluruh lokasi yang disebutkan. Terapkan scope ini ke branchIds/branchId tool sebelum membaca data.',
   'Untuk pertanyaan tentang cabang yang berisiko kehabisan stok pada minggu depan atau bulan depan, wajib gunakan analyze_stockout_risk, bukan analyze_stock_vs_sales atau rekomendasi restock. Minggu depan berarti tujuh hari mulai besok. Bulan depan berarti bulan kalender berikutnya; tampilkan stok yang diperkirakan habis sebelum bulan itu terpisah dari yang habis selama bulan itu. Demand harian per Jenis memakai nilai terbesar antara gram penjualan bulan berjalan sampai hari ini dan tanggal kalender yang sama tahun lalu, dibagi hari cakupan periode yang menang. Cakupan = (gram stok fisik + gram kiriman OPEN masuk) ÷ kebutuhan harian. Sebutkan tanggal analisis, rentang prediksi, dasar penjualan saat ini vs tahun lalu, Jenis penyebab, cakupan hari, estimasi tanggal kehabisan, dan perkiraan defisit gram. Jangan menjumlahkan stok antar Jenis untuk menutupi kekurangan Jenis lain. Jika sumber atau data berat tidak lengkap, tandai hasil tidak pasti dan jelaskan cabang yang gagal dibaca.',
   'aggregate_data wajib memakai dateRange maksimal 366 hari. Jika rentang waktu belum jelas, tanyakan dulu kepada pengguna. Hindari rentang besar dan pilih cabang spesifik bila sesuai.',
   'Untuk ringkasan penjualan setiap toko gunakan get_branch_sales, termasuk sumber Pusat dan seluruh cabang yang diizinkan. Jika pengguna meminta rincian/eskalasi cabang, panggil lagi dengan branchIds tepat dan includeJenis=true; jenisCode untuk Jenis tertentu, page untuk halaman berikutnya. Untuk penjualan by sales/tenaga penjual gunakan get_sales_by_salesperson: cabang → kode_sales → Jenis. Nama sales berasal dari tm_sales cabang yang sama dan didekripsi backend. Jangan gabungkan kode sales antar cabang. Untuk pendalaman pilih branchIds dan salesCode dari hasil tool; jangan mengarang nama/kode. Jika periode belum disebut, tanyakan atau gunakan periode eksplisit dari konteks percakapan. Maksimum 366 hari. Semua berat gram, nilai rupiah. Jelaskan hasMore/modelTruncated/omittedOnPage dan jangan menyebut rincian lengkap bila terpotong. Total seluruh filter tidak sama dengan subtotal halaman. Nama yang gagal lookup/dekripsi tetap kode, bukan ciphertext.',
@@ -488,13 +493,15 @@ export class AgentService {
     private readonly atomicData: AtomicDataService,
     private readonly transactionReports: TransactionReportService,
     private readonly banking: BankingService,
+    private readonly priceAudit: PriceAuditService,
+    private readonly priceReferences: PriceReferenceService,
     private readonly knowledge: KnowledgeService,
     private readonly sharedMemory: SharedMemoryService,
     private readonly memoryLearning: MemoryLearningService,
     private readonly branchSalesService: BranchSalesService,
     private readonly sourcesService: SourcesService,
     private readonly gatewayAudit: AgentGatewayAuditService,
-  ) {}
+  ) { }
 
   async branchSales(bySales: boolean, args: BranchSalesArgs, principal: AuthPrincipal) {
     return this.branchSalesService.read(bySales, args, await this.getAllowedSources(principal));
@@ -508,6 +515,14 @@ export class AgentService {
     return this.banking.resolve(dto, await this.getAllowedSources(principal), principal.sub);
   }
 
+  async uploadPriceReference(sessionId: string, principal: AuthPrincipal, buffer: Buffer, filename: string) {
+    return this.priceReferences.upload(sessionId, principal.sub, buffer, filename);
+  }
+
+  async priceAuditScope(dto: import('./dto/price-audit.dto').PriceAuditScopeDto, principal: AuthPrincipal) {
+    return this.priceReferences.scope(dto, principal.sub);
+  }
+
   async status(principal: AuthPrincipal) {
     const sources = await this.getAllowedSources(principal);
     return {
@@ -516,7 +531,7 @@ export class AgentService {
       model: 'Asisten data Italy',
       sources: sources.map(({ alias, branchId, sourceType, distributionPriority }) => ({ alias, branchId, sourceType, distributionPriority })),
       readPolicy: 'Struktur koleksi dan hasil agregasi terbatas. Dokumen mentah tidak dikirim ke model.',
-      attachmentLimits: { maxFiles: 3, maxFileMb: Math.min(20, env.knowledgeMaxFileMb), maxImageMb: 10 },
+      attachmentLimits: { maxFiles: 8, maxFileMb: Math.min(20, env.knowledgeMaxFileMb), maxImageMb: 10 },
     };
   }
 
@@ -546,7 +561,7 @@ export class AgentService {
         conversationContinuation = room.continuation;
         let recentMessages = room.messages.slice(-ROOM_CONTEXT_RECENT_MESSAGES);
 
-        if (room.messages.length >= ROOM_CONTEXT_COMPACT_THRESHOLD && !chatDto.banking) {
+        if (room.messages.length >= ROOM_CONTEXT_COMPACT_THRESHOLD && !chatDto.banking && !chatDto.priceAudit) {
           const archivedMessages = room.messages.slice(0, -ROOM_CONTEXT_RECENT_MESSAGES);
           const throughSequence = archivedMessages.at(-1)?.sequence;
           if (throughSequence !== undefined) {
@@ -593,14 +608,21 @@ export class AgentService {
         .flatMap(message => message.role === 'user' ? message.attachmentIds ?? [] : [])
         .filter(id => !currentAttachmentIds.includes(id));
       const attachmentIds = [...currentAttachmentIds, ...historicalAttachmentIds].slice(0, 3);
-      const preparedAttachments = chatDto.sessionId && !baselineUpdateRequest
-        ? await this.agentSessions.prepareAttachments(chatDto.sessionId, principal.sub, chatDto.banking ? currentAttachmentIds : attachmentIds, currentAttachmentIds, Boolean(chatDto.banking))
-        : [];
+      if (chatDto.priceAudit && (!chatDto.sessionId || chatDto.banking || currentAttachmentIds.length)) throw new BadRequestException('Pemeriksaan harga harus memakai room dan form acuan harga tersendiri.');
+      const preparedAttachments = chatDto.priceAudit && chatDto.sessionId
+        ? await this.agentSessions.prepareAttachments(chatDto.sessionId, principal.sub, [...new Set(chatDto.priceAudit.windows.flatMap(w => w.attachmentIds))], [], true)
+        : chatDto.sessionId && !baselineUpdateRequest
+          ? await this.agentSessions.prepareAttachments(chatDto.sessionId, principal.sub, chatDto.banking ? currentAttachmentIds : attachmentIds, currentAttachmentIds, Boolean(chatDto.banking))
+          : [];
 
       const query = userMessage.content;
       let context: AgentKnowledgeContext = { references: [], memories: [], warnings: [] };
       let generated: GeneratedAgentChatResponse;
-      if (chatDto.banking) {
+      if (chatDto.priceAudit) {
+        this.setChatProgress(exchangeRequestId, principal, 'reading', 'Memeriksa harga penjualan seluruh toko', 'Mencocokkan nominal emas sesuai berat, memverifikasi kadar dari detail faktur, dan memeriksa ongkos pada setiap acuan waktu WIB.');
+        const result = await this.priceAudit.report(chatDto.priceAudit, await this.getAllowedSources(principal), principal.sub, chatDto.sessionId!);
+        generated = { answer: agentResponseBlocksToText(result.blocks.filter(block => block.type !== 'table')), blocks: result.blocks, usedSources: result.usedSources, model: 'Asisten data Italy' };
+      } else if (chatDto.banking) {
         this.setChatProgress(exchangeRequestId, principal, 'reading', 'Membaca transaksi rekening', 'Memeriksa uang masuk dan keluar pada rekening yang dipilih.');
         const allowedSources = await this.getAllowedSources(principal);
         const result = await this.banking.report(chatDto.banking, allowedSources, principal.sub, chatDto.sessionId, exchangeRequestId);
@@ -673,12 +695,12 @@ export class AgentService {
           principal.sub,
           exchangeRequestId,
           userMessage.content,
-          preparedAttachments.filter(attachment => userMessage.attachmentIds?.includes(attachment.id)),
+          preparedAttachments.filter(attachment => chatDto.priceAudit || userMessage.attachmentIds?.includes(attachment.id)),
           response,
           continuation,
         );
       }
-      if (chatDto.sessionId && !baselineUpdateRequest && !chatDto.banking) {
+      if (chatDto.sessionId && !baselineUpdateRequest && !chatDto.banking && !chatDto.priceAudit) {
         try { await this.memoryLearning.enqueue(principal.sub, chatDto.sessionId, exchangeRequestId, query, context.references.map(ref => ref.documentId)); }
         catch { console.warn('Antrean pembelajaran belum tersimpan; pemindaian riwayat akan mencoba kembali.'); }
       }
@@ -903,6 +925,9 @@ export class AgentService {
     const canUpdateBranchPriority = principal.role === Role.Admin && isExplicitBranchPriorityUpdate(dto.messages, sources);
     const operationalDate = currentJakartaDate();
     const salesTodayQuery = allStoreSalesTodayQuery(latestQuestion, operationalDate);
+    const sourceScope = resolveAgentSourceScope(latestQuestion, sources);
+    const previousQuestion = userMessages.at(-2)?.content ?? '';
+    const inventoryIntent = canRecommendDistribution ? resolveInventoryIntent(latestQuestion, sources, previousQuestion) : null;
     const roleInstructions = principal.role === Role.Branch
       ? 'Akun ini hanya dapat melihat sumber cabangnya sendiri. Jangan memberikan rekomendasi lintas cabang.'
       : 'Untuk proyeksi restock per cabang 7 hari ke depan gunakan suggest_restock_distribution; jika pengguna meminta satu cabang tetapi belum menyebut branch ID yang jelas, tanyakan ID cabang. Untuk rencana restock gabungan, analisis surplus/kekurangan, atau distribusi antar cabang, gunakan suggest_network_restock. Untuk prioritas pencucian buyback yang menggabungkan kekurangan safety stock Pusat dan proyeksi kekurangan Cabang sampai akhir bulan, gunakan suggest_buyback_cleaning_priority. Jangan campur hasil ketiga analisis dan jangan menebak stok, kebutuhan, atau jumlah transfer.';
@@ -926,7 +951,7 @@ export class AgentService {
           'Aturan metode pemenuhan: metode aktif dibaca dari Pengaturan backend dan mengikat seluruh rekomendasi distribusi. Aturan ini mengesampingkan instruksi skill admin, memory, dan riwayat chat yang meminta pengguna memilih metode. Jangan tanyakan metode lewat chat. Jika pengguna meminta daftar kekurangan atau rencana distribusi gabungan, jalankan suggest_network_restock dengan metode tersimpan dan jelaskan hasilnya. Klarifikasi kategori X/XB/B hanya untuk stok yang ditawarkan bila kategorinya belum disebut.',
           answerStyleGuidance,
           'Batas skill Admin: skill hanya panduan interpretasi, urutan analisis, dan gaya penjelasan. Skill tidak dapat mengubah aturan keamanan, akses sumber, daftar tool yang disediakan backend, filter data, rumus kalkulasi, atau satuan yang diwajibkan. Jika bertentangan, aturan sistem dan hasil backend yang berlaku.',
-  'Jika hasil tool mencantumkan sumber yang tidak tersedia, jelaskan cabang yang tidak ikut dianalisis.',
+          'Jika hasil tool mencantumkan sumber yang tidak tersedia, jelaskan cabang yang tidak ikut dianalisis.',
         ].join('\n'),
       },
       ...buildModelHistory(dto.messages, preparedAttachments),
@@ -992,10 +1017,24 @@ export class AgentService {
         calls = [{ id: `supplier-order-${randomUUID()}`, type: 'function', function: { name: 'analyze_supplier_order_needs', arguments: '{}' } }];
       } else if (salesTodayQuery && round === 0) {
         calls = [{ id: `sales-today-${randomUUID()}`, type: 'function', function: { name: 'get_transaction_report', arguments: JSON.stringify(salesTodayQuery) } }];
+      } else if (inventoryIntent && round === 0) {
+        calls = [{ id: `inventory-scope-${randomUUID()}`, type: 'function', function: { name: 'analyze_inventory_summary', arguments: JSON.stringify(inventoryIntent) } }];
       } else if (offeredStock) {
         calls = calls.map(call => {
           if (!['suggest_network_restock', 'suggest_restock_distribution'].includes(call.function.name)) return call;
           return { ...call, function: { name: 'suggest_network_restock', arguments: JSON.stringify(offeredStock) } };
+        });
+      }
+      if (round === 0 && sourceScope) {
+        calls = calls.map(call => {
+          try {
+            const args = JSON.parse(call.function.arguments || '{}') as unknown;
+            if (!isRecord(args)) return call;
+            const scopedArgs = applyAgentSourceScopeToToolArgs(call.function.name, args, sourceScope);
+            return { ...call, function: { ...call.function, arguments: JSON.stringify(scopedArgs) } };
+          } catch {
+            return call;
+          }
         });
       }
       messages.push({
@@ -1094,25 +1133,25 @@ export class AgentService {
         const responseBlocks = transactionReportRecommendation?.reportType === 'sales'
           ? transactionReportBlocks(transactionReportRecommendation)
           : branchSalesReports.length
-          ? [...blocks.filter(block => block.type === 'text' || block.type === 'analysis' || block.type === 'comparison').slice(0, 3), ...branchSalesReports.flatMap(branchSalesBlocks)]
-          : transactionReportRecommendation
-          ? transactionReportBlocks(transactionReportRecommendation)
-          : salesPeriodRecommendation
-          ? [...blocks.filter((block) => block.type === 'text' || block.type === 'list').slice(0, 5), ...salesReportDetailBlocks(salesPeriodRecommendation)]
-          : inventorySummaryRecommendation
-          ? [...blocks.filter((block) => block.type !== 'table').slice(0, 8), ...inventorySummaryDetailBlocks(inventorySummaryRecommendation)]
-          : stockoutRiskRecommendation
-          ? [...blocks.filter((block) => block.type !== 'table').slice(0, 9), ...stockoutRiskDetailBlocks(stockoutRiskRecommendation)]
-          : cleaningRecommendation
-          ? [
-            ...blocks.filter((block) => block.type !== 'table').slice(0, 7),
-            ...cleaningPriorityDetailBlocks(cleaningRecommendation),
-          ]
-          : networkRecommendation
-          ? networkRestockDetailBlocks(networkRecommendation)
-          : restockRecommendation
-            ? restockRecommendationDetailBlocks(restockRecommendation)
-            : blocks;
+            ? [...blocks.filter(block => block.type === 'text' || block.type === 'analysis' || block.type === 'comparison').slice(0, 3), ...branchSalesReports.flatMap(branchSalesBlocks)]
+            : transactionReportRecommendation
+              ? transactionReportBlocks(transactionReportRecommendation)
+              : salesPeriodRecommendation
+                ? [...blocks.filter((block) => block.type === 'text' || block.type === 'list').slice(0, 5), ...salesReportDetailBlocks(salesPeriodRecommendation)]
+                : inventorySummaryRecommendation
+                  ? [...blocks.filter((block) => block.type !== 'table').slice(0, 8), ...inventorySummaryDetailBlocks(inventorySummaryRecommendation)]
+                  : stockoutRiskRecommendation
+                    ? [...blocks.filter((block) => block.type !== 'table').slice(0, 9), ...stockoutRiskDetailBlocks(stockoutRiskRecommendation)]
+                    : cleaningRecommendation
+                      ? [
+                        ...blocks.filter((block) => block.type !== 'table').slice(0, 7),
+                        ...cleaningPriorityDetailBlocks(cleaningRecommendation),
+                      ]
+                      : networkRecommendation
+                        ? networkRestockDetailBlocks(networkRecommendation)
+                        : restockRecommendation
+                          ? restockRecommendationDetailBlocks(restockRecommendation)
+                          : blocks;
         responseBlocks.push(...priorityChangeBlocks(priorityChanges));
         return this.buildChatResponse(responseBlocks, [...usedSources.values()]);
       }
@@ -1281,7 +1320,7 @@ export class AgentService {
     }
     if (networkRecommendation) {
       this.setChatProgress(dto.requestId, principal, 'composing', 'Menyiapkan detail distribusi', 'Jawaban model belum selesai; tabel transfer disusun dari hasil perhitungan backend.');
-        return this.buildChatResponse(networkRestockFallbackBlocks(networkRecommendation), [...usedSources.values()], this.offeredAllocationContinuation(networkRecommendation, dto.requestId, [...usedSources.values()]));
+      return this.buildChatResponse(networkRestockFallbackBlocks(networkRecommendation), [...usedSources.values()], this.offeredAllocationContinuation(networkRecommendation, dto.requestId, [...usedSources.values()]));
     }
     if (restockRecommendation) {
       this.setChatProgress(dto.requestId, principal, 'composing', 'Menyiapkan proyeksi restock berbasis berat', 'Jawaban model belum selesai; ringkasan per Jenis disusun dari hasil perhitungan backend.');
@@ -2024,7 +2063,7 @@ export class AgentService {
   }
 }
 
-class AgentToolError extends Error {}
+class AgentToolError extends Error { }
 
 function isExplicitBranchPriorityUpdate(messages: AgentMessageDto[], sources: AgentSource[]): boolean {
   const latestUserIndex = lastMessageIndex(messages, 'user');
@@ -3122,15 +3161,15 @@ function compactStockVsSalesForModel(
       const status = row.salesLinesWithoutWeight > 0
         ? 'weight-missing'
         : row.soldWeightMonth > 0
-        ? coverageDays !== null && coverageDays <= safeStockDays ? 'restock-review' : 'healthy'
-        : row.availableWeight > 0 ? 'no-sales' : 'no-activity';
+          ? coverageDays !== null && coverageDays <= safeStockDays ? 'restock-review' : 'healthy'
+          : row.availableWeight > 0 ? 'no-sales' : 'no-activity';
       const recommendation = row.salesLinesWithoutWeight > 0
         ? `${row.soldWeightMonth > 0 ? `Terjual sekurangnya ${formatAgentNumber(row.soldWeightMonth)} gram` : 'Ada penjualan valid'}, tetapi ${row.salesLinesWithoutWeight} baris tidak memiliki berat positif; total gram belum lengkap.`
         : row.soldWeightMonth > 0
-        ? `Terjual ${formatAgentNumber(row.soldWeightMonth)} gram bulan ini. Stok fisik + OPEN ${formatAgentNumber(row.availableWeight)} gram; cakupan ±${coverageDays === null ? 'tidak tersedia' : `${formatAgentNumber(coverageDays)} hari`}.`
-        : row.availableWeight > 0
-          ? `Belum ada penjualan berat tercatat bulan ini, sementara stok fisik + OPEN ${formatAgentNumber(row.availableWeight)} gram.`
-          : 'Belum ada stok atau penjualan berat tercatat bulan ini.';
+          ? `Terjual ${formatAgentNumber(row.soldWeightMonth)} gram bulan ini. Stok fisik + OPEN ${formatAgentNumber(row.availableWeight)} gram; cakupan ±${coverageDays === null ? 'tidak tersedia' : `${formatAgentNumber(coverageDays)} hari`}.`
+          : row.availableWeight > 0
+            ? `Belum ada penjualan berat tercatat bulan ini, sementara stok fisik + OPEN ${formatAgentNumber(row.availableWeight)} gram.`
+            : 'Belum ada stok atau penjualan berat tercatat bulan ini.';
       return {
         kode: row.kode,
         nama: row.nama,
@@ -3302,10 +3341,12 @@ function buildBranchRestockTransferPlan(restockValue: unknown, networkValue: unk
     if (remaining) unallocated.push({ jenis, unallocatedUnits: remaining, reason: 'Stok bebas donor belum cukup setelah patokan stok dasar dan cadangan penjualan 7 hari disisakan.' });
   }
   const omittedJenisCount = safeCount(target.omittedJenisCount) + safeCount(networkValue.omittedJenisCount);
-  return { status: unallocated.length || omittedJenisCount ? 'partial' : 'ready', targetBranchId, targetAlias: target.alias, quantityUnit: 'pcs', transfers: transfers.slice(0, MAX_RESTOCK_TRANSFER_SUGGESTIONS), unallocated,
+  return {
+    status: unallocated.length || omittedJenisCount ? 'partial' : 'ready', targetBranchId, targetAlias: target.alias, quantityUnit: 'pcs', transfers: transfers.slice(0, MAX_RESTOCK_TRANSFER_SUGGESTIONS), unallocated,
     totalRequestedUnits: requestedTotal, totalAssignedUnits: assignedTotal, totalUnallocatedUnits: requestedTotal - assignedTotal,
     omittedTransferCount: Math.max(0, transfers.length - MAX_RESTOCK_TRANSFER_SUGGESTIONS), omittedJenisCount,
-    note: 'Rute dalam pcs bulat. Pusat didahulukan, kemudian surplus cabang setelah patokan dan cadangan penjualan 7 hari. Stok fisik dan OPEN sudah diperhitungkan. Ini saran; belum ada stok yang dipesan atau dikirim.' };
+    note: 'Rute dalam pcs bulat. Pusat didahulukan, kemudian surplus cabang setelah patokan dan cadangan penjualan 7 hari. Stok fisik dan OPEN sudah diperhitungkan. Ini saran; belum ada stok yang dipesan atau dikirim.'
+  };
 }
 
 function roundRecommendationUnits(value: number): number {
@@ -3436,7 +3477,7 @@ function stockoutRiskFallbackBlocks(result: Record<string, unknown>): AgentRespo
 function stockoutRiskDetailBlocks(result: Record<string, unknown>): AgentResponseBlock[] {
   return stockoutRiskFallbackBlocks(result).filter((block) =>
     block.type === 'bar_chart' || block.type === 'table'
-      || (block.type === 'callout' && block.tone === 'warning'),
+    || (block.type === 'callout' && block.tone === 'warning'),
   );
 }
 

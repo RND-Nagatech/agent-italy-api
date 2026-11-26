@@ -194,6 +194,7 @@ function addNonCashBlocks(blocks: AgentResponseBlock[], sources: UnknownRecord[]
 
 function addMarketplaceBlocks(blocks: AgentResponseBlock[], sources: UnknownRecord[]) {
   const allRows = sources.flatMap((source) => rowsOf(source));
+  blocks.push({ type: 'text', variant: 'muted', text: 'Pengembalian kelebihan pembayaran ditampilkan per grup faktur.' });
   const totalFinal = allRows.reduce((sum, row) => sum + numberValue(row.harga_online_final), 0);
   blocks.push(metric('Total harga online (semua toko)', totalFinal, 'IDR', 'navy'));
   for (const source of sources) {
@@ -205,7 +206,7 @@ function addMarketplaceBlocks(blocks: AgentResponseBlock[], sources: UnknownReco
     blocks.push({
       type: 'table',
       title: `Data ${sourceLabel(source)}`,
-      columns: ['No. Faktur Utama', 'Marketplace', 'Harga Jual (IDR)', 'Ongkos (IDR)', 'Biaya Admin (IDR)', 'Packing (IDR)', 'Plastik Bening (IDR)', 'Total Harga Online (IDR)', 'Lebih Bayar (IDR)', 'Input oleh'],
+      columns: ['No. Faktur Utama', 'Marketplace', 'Harga Jual (IDR)', 'Ongkos (IDR)', 'Biaya Admin (IDR)', 'Packing (IDR)', 'Plastik Bening (IDR)', 'Total Harga Online (IDR)', 'Pengembalian Kelebihan Pembayaran (IDR)', 'Otorisasi di Bawah Modal', 'Keterangan Otorisasi', 'Input oleh'],
       rows: rows.map((row) => [
         cell(row.no_faktur_utama),
         cell(row.kode_marketplace),
@@ -216,6 +217,8 @@ function addMarketplaceBlocks(blocks: AgentResponseBlock[], sources: UnknownReco
         numberCell(row.harga_plastik_bening_nota),
         numberCell(row.harga_online_final),
         numberCell(row.lebih_bayar),
+        cell(isRecord(row.belowCostAuthorization) ? row.belowCostAuthorization.status : 'Belum dapat diperiksa'),
+        cell(isRecord(row.belowCostAuthorization) ? row.belowCostAuthorization.note : 'Otorisasi belum diperiksa pada laporan ini.'),
         cell(row.input_by),
       ]),
     });

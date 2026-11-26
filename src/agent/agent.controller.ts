@@ -23,6 +23,8 @@ import { AgentHistoryService } from './agent-history.service';
 import { AgentGatewayAuditService } from './agent-gateway-audit.service';
 import { env } from '../config/env';
 import { BankingScopeDto } from './dto/banking.dto';
+import { PriceAuditScopeDto, PriceReadDto } from './dto/price-audit.dto';
+import { PriceReadService } from './price-read.service';
 import { attachmentUploadLogFor } from './attachment-upload.logger';
 
 @Controller('agent')
@@ -36,6 +38,7 @@ export class AgentController {
     private readonly traces: AgentRunTracesService,
     private readonly history: AgentHistoryService,
     private readonly gatewayAudit: AgentGatewayAuditService,
+    private readonly priceReads: PriceReadService,
   ) {}
 
   @Get('gateway-audit')
@@ -104,6 +107,37 @@ export class AgentController {
   @Throttle({ default: { limit: 12, ttl: 60_000, getTracker: agentUserTracker } })
   bankingScope(@Body() dto: BankingScopeDto, @CurrentUser() principal: AuthPrincipal) {
     return this.agent.bankingScope(dto, principal);
+  }
+
+  @Post('price-audit/scope')
+  @Header('Cache-Control', 'no-store')
+  @Throttle({ default: { limit: 12, ttl: 60_000, getTracker: agentUserTracker } })
+  priceAuditScope(@Body() dto: PriceAuditScopeDto, @CurrentUser() principal: AuthPrincipal) {
+    return this.agent.priceAuditScope(dto, principal);
+  }
+
+  @Post('price-audit/reads')
+  @Header('Cache-Control', 'no-store')
+  @Throttle({ default: { limit: 30, ttl: 60_000, getTracker: agentUserTracker } })
+  startPriceRead(@Body() dto: PriceReadDto, @CurrentUser() principal: AuthPrincipal) {
+    return this.priceReads.start(dto.sessionId, dto.attachmentId, principal.sub);
+  }
+
+  @Get('price-audit/reads/:id')
+  @Header('Cache-Control', 'no-store')
+  @Throttle({ default: { limit: 150, ttl: 60_000, getTracker: agentUserTracker } })
+  priceReadStatus(@Param('id') id: string, @CurrentUser() principal: AuthPrincipal) {
+    return this.priceReads.get(id, principal.sub);
+  }
+
+  @Post('sessions/:sessionId/price-reference-uploads')
+  @Header('Cache-Control', 'no-store')
+  @Throttle({ default: { limit: 40, ttl: 60_000, getTracker: agentUserTracker } })
+  async stagePriceFile(@Param('sessionId') sessionId: string, @Req() request: FastifyRequest, @CurrentUser() principal: AuthPrincipal) {
+    const maxBytes = Math.min(20, env.knowledgeMaxFileMb) * 1024 * 1024;
+    const part = await request.file({ limits: { fileSize: maxBytes } });
+    if (!part || part.fieldname !== 'file') throw new BadRequestException('Pilih satu file acuan harga.');
+    return this.sessions.uploadPriceAttachment(sessionId, principal.sub, await part.toBuffer(), part.filename);
   }
 
   @Get('skills')
@@ -214,6 +248,22 @@ export class AgentController {
       return await this.sessions.uploadAttachment(sessionId, principal.sub, buffer, part.filename, uploadLog);
     } catch (error) {
       uploadLog.fail(error);
+      throw error;
+    }
+  }
+
+  @Post('sessions/:sessionId/price-references')
+  @Header('Cache-Control', 'no-store')
+  @Throttle({ default: { limit: 40, ttl: 60_000, getTracker: agentUserTracker } })
+  async uploadPriceReference(@Param('sessionId') sessionId: string, @Req() request: FastifyRequest, @CurrentUser() principal: AuthPrincipal) {
+    const maxBytes = Math.min(20, env.knowledgeMaxFileMb) * 1024 * 1024;
+    try {
+      const part = await request.file({ limits: { fileSize: maxBytes } });
+      if (!part || part.fieldname !== 'file') throw new BadRequestException('Pilih satu file acuan harga.');
+      const buffer = await part.toBuffer();
+      return await this.agent.uploadPriceReference(sessionId, principal, buffer, part.filename);
+    } catch (error) {
+      if (error instanceof Error && /FST_REQ_FILE_TOO_LARGE|request file too large/i.test(error.message)) throw new BadRequestException('File acuan terlalu besar. Maksimal 20 MB per PDF / 10 MB per gambar.');
       throw error;
     }
   }

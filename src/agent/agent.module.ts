@@ -22,10 +22,14 @@ import { AgentGatewayAuditModule } from './agent-gateway-audit.module';
 import { TransactionReportService } from './transaction-report.service';
 import { BankingService } from './banking.service';
 import { BankStatementService } from './bank-statement.service';
+import { PriceAuditService } from './price-audit.service';
+import { PriceReferenceService } from './price-reference.service';
+import { PriceReadService } from './price-read.service';
+import { LegacyBarangModule } from '../database/legacy-barang.module';
 
 @Module({
-  imports: [SalesModule, SettingsModule, KnowledgeModule, StockBaselineModule, SourcesModule, AgentGatewayAuditModule],
+  imports: [SalesModule, SettingsModule, KnowledgeModule, StockBaselineModule, SourcesModule, AgentGatewayAuditModule, LegacyBarangModule],
   controllers: [AgentController],
-  providers: [BranchSalesService, AtomicDataService, TransactionReportService, BankingService, BankStatementService, AgentService, AgentSessionsService, AgentRunTracesService, AgentHistoryService, AgentSkillsService, PriorityReviewReminderService, RestockRecommendationService, NetworkRestockRecommendationService, CleaningPriorityService, StockoutRiskService, InventorySummaryService],
+  providers: [PriceReadService, PriceAuditService, PriceReferenceService, BranchSalesService, AtomicDataService, TransactionReportService, BankingService, BankStatementService, AgentService, AgentSessionsService, AgentRunTracesService, AgentHistoryService, AgentSkillsService, PriorityReviewReminderService, RestockRecommendationService, NetworkRestockRecommendationService, CleaningPriorityService, StockoutRiskService, InventorySummaryService],
 })
 export class AgentModule {}

@@ -1,5 +1,6 @@
 import { Type } from 'class-transformer';
 import { BankSelectionDto } from './banking.dto';
+import { PriceAuditDto } from './price-audit.dto';
 import {
   ArrayMaxSize,
   ArrayMinSize,
@@ -29,6 +30,11 @@ export class AgentMessageDto {
 }
 
 export class AgentChatDto {
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => PriceAuditDto)
+  priceAudit?: PriceAuditDto;
+
   @IsOptional()
   @ValidateNested()
   @Type(() => BankSelectionDto)

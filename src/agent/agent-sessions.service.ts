@@ -68,6 +68,7 @@ type AgentChatAttachmentDocument = {
   size: number;
   fileId: ObjectId;
   extractedText?: string;
+  purpose?: 'price-audit';
   messageId?: ObjectId;
   createdAt: Date;
 };
@@ -137,9 +138,9 @@ export class AgentSessionsService {
       .sort({ sequence: 1, createdAt: 1, _id: 1 })
       .toArray();
     const pendingAttachments = await this.attachments.find(
-      { sessionId: id, ownerId, messageId: { $exists: false } },
+      { sessionId: id, ownerId, messageId: { $exists: false }, purpose: { $ne: 'price-audit' } },
       { projection: { filename: 1, mime: 1, size: 1, createdAt: 1 } },
-    ).sort({ createdAt: 1 }).limit(3).toArray();
+    ).sort({ createdAt: 1 }).limit(8).toArray();
 
     return {
       ...this.toSummary(session),
@@ -171,6 +172,9 @@ export class AgentSessionsService {
         fileIds.push(...attachmentFiles.map(attachment => attachment.fileId));
         await this.attachments.deleteMany({ sessionId: id, ownerId }, { session: transaction });
         await this.mongo.db.collection('agent_bank_statements').deleteMany({ sessionId, ownerId }, { session: transaction });
+        await this.mongo.db.collection('agent_price_references').deleteMany({ sessionId: id, ownerId }, { session: transaction });
+        await this.mongo.db.collection('agent_price_extractions').deleteMany({ sessionId: id, ownerId }, { session: transaction });
+        await this.mongo.db.collection('agent_price_read_jobs').deleteMany({ sessionId: id, ownerId }, { session: transaction });
         await this.mongo.db.collection('agent_bank_reconciliations').deleteMany({ sessionId, ownerId }, { session: transaction });
         await this.mongo.db.collection('agent_history_jobs').updateOne(
           { dedupeKey: `delete:${ownerId}:${id.toHexString()}` },
@@ -202,15 +206,19 @@ export class AgentSessionsService {
     }
   }
 
-  private async storeAttachment(sessionId: string, ownerId: string, buffer: Buffer, originalName: string, uploadLog: AttachmentUploadLog) {
+  async uploadPriceAttachment(sessionId: string, ownerId: string, buffer: Buffer, originalName: string) {
+    return this.storeAttachment(sessionId, ownerId, buffer, originalName, new AttachmentUploadLog(), 'price-audit');
+  }
+
+  private async storeAttachment(sessionId: string, ownerId: string, buffer: Buffer, originalName: string, uploadLog: AttachmentUploadLog, purpose?: 'price-audit') {
     uploadLog.stage('session_access');
     const sessionObjectId = this.parseId(sessionId);
     await this.assertOwner(sessionId, ownerId);
     const maxBytes = Math.min(20, env.knowledgeMaxFileMb) * 1024 * 1024;
     if (!buffer.length || buffer.length > maxBytes) throw new BadRequestException(`Ukuran file harus di bawah ${Math.floor(maxBytes / (1024 * 1024))} MB.`);
     uploadLog.stage('pending_attachments', { sizeBytes: buffer.length, maxBytes });
-    const pendingCount = await this.attachments.countDocuments({ sessionId: sessionObjectId, ownerId, messageId: { $exists: false } });
-    if (pendingCount >= 3) throw new BadRequestException('Maksimal 3 lampiran dapat disiapkan sekaligus.');
+    const pendingCount = await this.attachments.countDocuments({ sessionId: sessionObjectId, ownerId, messageId: { $exists: false }, purpose: purpose ?? { $ne: 'price-audit' } });
+    if (pendingCount >= (purpose ? 64 : 8)) throw new BadRequestException(purpose ? 'Maksimal 64 file acuan per room. Gunakan room baru untuk pemeriksaan berikutnya.' : 'Maksimal 8 lampiran dapat disiapkan sekaligus.');
 
     const filename = basename(originalName.replace(/\\/g, '/')).replace(/[\x00-\x1f]/g, '').slice(0, 180);
     uploadLog.redact(filename);
@@ -264,7 +272,7 @@ export class AgentSessionsService {
     }
     const document: AgentChatAttachmentDocument = {
       _id: new ObjectId(), sessionId: sessionObjectId, ownerId, filename, mime,
-      size: buffer.length, fileId: stream.id, ...(extractedText ? { extractedText } : {}), createdAt: new Date(),
+      size: buffer.length, fileId: stream.id, ...(purpose ? { purpose } : {}), ...(extractedText ? { extractedText } : {}), createdAt: new Date(),
     };
     uploadLog.stage('save_metadata');
     try { await this.attachments.insertOne(document); }
@@ -285,6 +293,8 @@ export class AgentSessionsService {
     const deleted = await this.attachments.deleteOne({ _id: document._id, sessionId: document.sessionId, ownerId, messageId: { $exists: false } });
     if (deleted.deletedCount) {
       await this.mongo.db.collection('agent_bank_statements').deleteMany({ sessionId, ownerId, 'statement.attachmentId': attachmentId });
+      await this.mongo.db.collection('agent_price_references').deleteMany({ sessionId: document.sessionId, ownerId, id: attachmentId });
+      await this.mongo.db.collection('agent_price_read_jobs').deleteMany({ sessionId: document.sessionId, ownerId, attachmentId });
       await this.bucket.delete(document.fileId).catch(() => undefined);
     }
   }
@@ -297,7 +307,7 @@ export class AgentSessionsService {
     metadataOnly = false,
   ): Promise<PreparedAgentChatAttachment[]> {
     const uniqueIds = [...new Set(attachmentIds)];
-    if (uniqueIds.length > 3) throw new BadRequestException('Maksimal 3 lampiran dapat dianalisis sekaligus.');
+    if (uniqueIds.length > (metadataOnly ? 64 : 3)) throw new BadRequestException('Jumlah lampiran melebihi batas pemeriksaan.');
     if (!uniqueIds.length) return [];
     const ids = uniqueIds.map(value => this.parseId(value));
     const documents = await this.attachments.find({ _id: { $in: ids }, sessionId: this.parseId(sessionId), ownerId }).toArray();
@@ -339,11 +349,16 @@ export class AgentSessionsService {
   }
 
   async bankingFiles(sessionId: string, ownerId: string, attachmentIds: string[]) {
+    if (new Set(attachmentIds).size > 3) throw new BadRequestException('Maksimal 3 lampiran rekening koran sekaligus.');
+    return this.priceFiles(sessionId, ownerId, attachmentIds);
+  }
+
+  async priceFiles(sessionId: string, ownerId: string, attachmentIds: string[]) {
     await this.assertOwner(sessionId, ownerId);
     const ids = [...new Set(attachmentIds)];
-    if (ids.length > 3) throw new BadRequestException('Maksimal 3 lampiran sekaligus.');
+    if (ids.length > 8) throw new BadRequestException('Maksimal 8 file acuan sekaligus.');
     const documents = await this.attachments.find({ _id: { $in: ids.map(id => this.parseId(id)) }, sessionId: this.parseId(sessionId), ownerId }).toArray();
-    if (documents.length !== ids.length) throw new NotFoundException('Lampiran rekening koran tidak tersedia di percakapan ini.');
+    if (documents.length !== ids.length) throw new NotFoundException('Lampiran tidak tersedia di percakapan ini.');
     return Promise.all(documents.map(async document => {
       const chunks: Buffer[] = [];
       for await (const chunk of this.bucket.openDownloadStream(document.fileId)) chunks.push(Buffer.from(chunk));

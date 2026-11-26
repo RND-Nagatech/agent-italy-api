@@ -7,7 +7,7 @@ import type { UserDocument } from '../users/user.types';
 const AUDIT_EMAIL = 'rnd@nagatech.id';
 const MAX_AUDIT_PAYLOAD_BYTES = 15 * 1024 * 1024;
 
-export type AgentGatewayAuditKind = 'chat' | 'room-summary' | 'memory-learning' | 'bank-extraction';
+export type AgentGatewayAuditKind = 'chat' | 'room-summary' | 'memory-learning' | 'bank-extraction' | 'price-extraction';
 export type AgentGatewayAuditOutcome = 'pending' | 'succeeded' | 'http-error' | 'network-error' | 'response-error';
 
 export type AgentGatewayAuditContext = {

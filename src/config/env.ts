@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import { z } from 'zod';
+import { decodeRdsSettings } from './rds-options';
 
 const environmentSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
@@ -40,6 +41,19 @@ const environmentSchema = z.object({
   HINDSIGHT_LEARN_HISTORY: z.enum(['true', 'false']).default('true').transform(v => v === 'true'),
   HINDSIGHT_BANK_ID: z.string().regex(/^[a-zA-Z0-9_-]+$/).default('italy-shared-v1'),
   ENC_KEY_DEC: z.string().trim().default(''),
+  RDS_URLDB_API: z.string().trim().max(4096).regex(/^(?:[a-fA-F0-9]{2})*$/).default(''),
+  RDS_DB_NAME: z.string().trim().max(512).regex(/^(?:[a-fA-F0-9]{2})*$/).default(''),
+  RDS_USERNAME: z.string().trim().max(512).regex(/^(?:[a-fA-F0-9]{2})*$/).default(''),
+  RDS_PASSWORD: z.string().trim().max(8192).regex(/^(?:[a-fA-F0-9]{2})*$/).default(''),
+}).superRefine((values, context) => {
+  const keys = ['RDS_URLDB_API', 'RDS_DB_NAME', 'RDS_USERNAME', 'RDS_PASSWORD'] as const;
+  if (!keys.some(key => values[key] !== '')) return;
+  for (const key of keys) if (values[key] === '') context.addIssue({ code: 'custom', path: [key], message: 'Complete all four RDS settings' });
+  if (!values.ENC_KEY_DEC) context.addIssue({ code: 'custom', path: ['ENC_KEY_DEC'], message: 'Required to decrypt RDS settings' });
+  if (keys.every(key => values[key] !== '') && values.ENC_KEY_DEC) {
+    try { decodeRdsSettings({ url: values.RDS_URLDB_API, database: values.RDS_DB_NAME, username: values.RDS_USERNAME, password: values.RDS_PASSWORD }, values.ENC_KEY_DEC); }
+    catch { context.addIssue({ code: 'custom', path: ['RDS_URLDB_API'], message: 'Check encrypted RDS settings and key' }); }
+  }
 });
 
 const parsedEnvironment = environmentSchema.safeParse(process.env);
@@ -75,6 +89,7 @@ export const env = {
   agentMaxOutputTokens: values.AGENT_MAX_OUTPUT_TOKENS,
   agentGatewayAuditRetentionDays: values.AGENT_GATEWAY_AUDIT_RETENTION_DAYS,
   encKeyDec: values.ENC_KEY_DEC,
+  rds: decodeRdsSettings({ url: values.RDS_URLDB_API, database: values.RDS_DB_NAME, username: values.RDS_USERNAME, password: values.RDS_PASSWORD }, values.ENC_KEY_DEC),
   knowledgeEnabled: values.KNOWLEDGE_ENABLED,
   knowledgeMaxFileMb: values.KNOWLEDGE_MAX_FILE_MB,
   qdrantUrl: values.QDRANT_URL.replace(/\/+$/, ''),

@@ -14,7 +14,7 @@ import { auditMarketplacePrice, marketplacePriceReportTable, marketplaceStatusLa
 import { buybackReportTable } from './buyback-report.logic';
 import { headerSchedule, priceReferenceParts } from './price-reference-periods';
 import { LegacyBarangService, type LegacyBarangLookup, type LegacyBarangMatch } from '../database/legacy-barang.service';
-import { invoiceAuthorization, readBelowCostAuthorizations } from './marketplace-authorization';
+import { invoiceAuthorization, readAboveNoteBuybackAuthorizations, readBelowCostAuthorizations } from './marketplace-authorization';
 
 const number = (value: unknown): number | null => {
   if (typeof value === 'number') return Number.isFinite(value) ? value : null;
@@ -302,6 +302,8 @@ export class PriceAuditService {
               items.push({ record, tx });
             }
             await fillBuybackMaster(items, db, cache, this.legacy, legacyCache);
+            const authorizations = await readAboveNoteBuybackAuthorizations(db, items.map(({ tx }) => tx.invoice));
+            for (const { tx } of items) tx.aboveNoteAuthorization = invoiceAuthorization([tx.invoice], authorizations, 'pembelian di atas nota');
             for (const { tx } of items) {
               if (autoBatch) { sourceRows.push(auditBuybackBatches(tx, references)); continue; }
               const window = dto.windows.find(w => w.date === tx.date && tx.time.slice(0, 5) >= w.fromTime && tx.time.slice(0, 5) < w.toTime);

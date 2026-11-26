@@ -133,6 +133,7 @@ function addAuthorizationBlocks(blocks: AgentResponseBlock[], sources: UnknownRe
         cell(row.input_by),
       ]),
     });
+    if (source.truncated) blocks.push({ type: 'callout', tone: 'info', title: 'Rincian otorisasi dibatasi', text: `${sourceLabel(source)}: laporan dan ekspor Excel memuat ${rows.length} baris otorisasi yang tersedia pada tabel. Persempit rentang tanggal untuk membaca data lainnya.` });
   }
 }
 

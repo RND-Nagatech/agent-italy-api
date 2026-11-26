@@ -70,6 +70,7 @@ export function buybackReportTable(rows: BuybackAuditRow[], references: PriceRef
   return { type: 'table', title: 'Audit harga buyback perhiasan', columns: [
     'Tanggal', 'Jam WIB', 'Toko', 'No. Faktur', 'Nama Barang', 'Kode Intern', 'Kondisi',
     'Berat (gram)', 'Harga Buyback (IDR)', 'Harga Nota (IDR)', 'Harga Rata per gram (IDR)', ...rangeColumns, ...(timed ? ['Batch Acuan', 'Dasar Penentuan Batch', 'Berlaku WIB'] : ['Batch yang Sesuai']), 'Hasil Pemeriksaan', 'Keterangan Pemeriksaan',
+    'Otorisasi di Atas Nota', 'Deskripsi Otorisasi', 'Keterangan Otorisasi',
     'Barcode', 'Kode Acuan', 'Kadar Cetak', ...(!autoBatch ? ['Acuan Waktu'] : []), 'File Acuan', 'Input oleh',
   ], rows: rows.map(row => {
     const evaluations = row.batchEvaluations ?? [];
@@ -87,7 +88,9 @@ export function buybackReportTable(rows: BuybackAuditRow[], references: PriceRef
     return [row.date, row.time || 'Belum tersedia', row.store, row.invoice, row.name, row.internalCode || '-', row.condition || 'Belum terbaca',
       row.weight, row.price, row.invoicePrice ?? null, row.pricePerGram ?? 'Belum tersedia', ...rangeCells, batch,
       ...(timed ? [row.batchBasis === 'time' ? 'Jam transaksi' : 'Harga (file tanpa jam)', row.effectiveFrom ? `${row.effectiveFrom}–${row.effectiveTo === '24:00' ? 'akhir hari' : `sebelum ${row.effectiveTo}`}` : row.batchBasis === 'time' ? 'Belum dapat ditentukan' : 'Tidak tercantum pada file'] : []),
-      row.status, explanation(row, evaluations), row.barcode || 'Tidak tersedia', row.code || '-',
+      row.status, explanation(row, evaluations), row.aboveNoteAuthorization?.status ?? 'Belum dapat diperiksa',
+      row.aboveNoteAuthorization?.description || (row.aboveNoteAuthorization?.status === 'Tidak ditemukan' ? 'Tidak ditemukan' : 'Belum dapat diperiksa'),
+      row.aboveNoteAuthorization?.note ?? 'Otorisasi belum diperiksa pada laporan ini.', row.barcode || 'Tidak tersedia', row.code || '-',
       row.printedKadar || 'Tidak tersedia', ...(!autoBatch ? [row.window] : []), row.reference || 'Belum dapat ditentukan', row.inputBy];
   }) };
 }

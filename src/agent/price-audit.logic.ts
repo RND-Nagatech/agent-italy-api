@@ -16,6 +16,7 @@ export type AuditTransaction = {
   invoicePrice?: number | null;
   marketplace?: string; invoiceGroup?: string; overpayment?: number | null;
   belowCostAuthorization?: import('./marketplace-authorization').BelowCostAuthorization;
+  aboveNoteAuthorization?: import('./marketplace-authorization').InvoiceAuthorization;
   fee: number | null; quantity: number; condition: string; inputBy: string;
   barcode?: string; kadarSource?: string; kadarNote?: string;
   internalCode?: string; printedKadar?: string; lookupNote?: string; masterSource?: 'MongoDB' | 'MariaDB (RDS)';

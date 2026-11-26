@@ -74,6 +74,14 @@ const mongoFor = (facet, missing) => ({ getDatabase: database => {
   assert(!tables[0].columns.some(column => /group/i.test(column)));
   assert(blocks.some(block => block.type === 'callout' && /seluruh periode/.test(block.text)));
 
+  const authorizationSource = { ...sources[0], status: 'available', truncated: true, rows: [{ datetime: '2026-11-18T04:00:00.000Z', no_faktur: 'FJ-AUTH', kode_barcode: '000123', keterangan: 'Disetujui harga khusus', description: 'PENJUALAN DI BAWAH MODAL', berat_awal: 1.75, berat: 1.71, input_by: 'SUPERVISOR' }] };
+  const authorizationBlocks = transactionReportBlocks({ reportType: 'authorization_sales', period: range, sources: [authorizationSource] });
+  const authorizationTable = authorizationBlocks.find(block => block.type === 'table');
+  assert.deepEqual(authorizationTable.columns, ['Tanggal', 'No. Faktur', 'Barcode', 'Keterangan', 'Deskripsi', 'Berat Awal (gram)', 'Berat (gram)', 'Input oleh']);
+  assert.equal(authorizationTable.rows[0][1], 'FJ-AUTH'); assert.equal(authorizationTable.rows[0][2], '000123'); assert.equal(authorizationTable.rows[0][3], 'Disetujui harga khusus');
+  assert(authorizationBlocks.some(block => block.type === 'callout' && /ekspor Excel memuat 1 baris/.test(block.text)));
+  assert(!transactionReportBlocks({ reportType: 'authorization_sales', sources: [{ ...authorizationSource, truncated: false }] }).some(block => block.type === 'callout'));
+
   const selected = await service.read({ reportType: 'sales', ...range, branchIds: ['PUSAT'] }, sources);
   assert.deepEqual(selected.sources.map(source => source.branchId), ['PUSAT']);
   await assert.rejects(service.read({ reportType: 'sales', ...range, branchIds: ['PUSAT'] }, [sources[1]]));

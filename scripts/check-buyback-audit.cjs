@@ -30,6 +30,11 @@ const mongo = { getDatabase(database) { return {
   listCollections() { return { async hasNext() { return true; } }; },
   collection(name) {
     readCollections.add(name);
+    if (name === 'tt_authorization') return { find(query) {
+      assert.equal(query.kategori,'PEMBELIAN'); assert.equal(query.datetime,undefined);
+      assert.ok(!query.no_faktur.$in.includes('cancelled')); assert.ok(!query.no_faktur.$in.includes('boundary'));
+      return { maxTimeMS(){return this;},sort(){return this;},limit(){return this;},async toArray(){return database === 'pusat' ? [{no_faktur:'outside,within',kategori:'PEMBELIAN',description:'PEMBELIAN DI ATAS NOTA',keterangan:'Disetujui supervisor'}] : [];} };
+    } };
     if (name === 'tm_barang') return { find(query, { projection }) {
       masterQueries++; assert.equal(projection.kode_intern, 1); assert.equal(projection.kode_barcode, 1);
       assert.deepEqual(query.kode_barcode.$in.sort(), ['0011249980', '0099999999']);
@@ -60,7 +65,7 @@ const mongo = { getDatabase(database) { return {
   assert.ok(table.rows.every(row => row.length === table.columns.length));
   assert.equal(table.rows.length, 16, 'eight non-cancelled in-window details from each store, including missing master and rate');
   assert.equal(masterQueries, 2, 'one batch master lookup per store; repeated barcodes share the cache');
-  assert.deepEqual([...readCollections].sort(), ['tm_barang', 'tt_beli_detail']);
+  assert.deepEqual([...readCollections].sort(), ['tm_barang', 'tt_authorization', 'tt_beli_detail']);
   assert.ok(!report.blocks.some(block => block.type === 'table' && /penjualan/.test(block.title)));
   for (const source of sources) {
     const rows = table.rows.filter(row => cell(row, 'Toko') === source.alias);
@@ -73,6 +78,12 @@ const mongo = { getDatabase(database) { return {
     const outside = rows.find(row => cell(row, 'No. Faktur') === 'outside');
     assert.equal(cell(outside, 'Harga Nota (IDR)'), 0);
     assert.equal(cell(outside, 'Hasil Pemeriksaan'), 'Di luar range acuan', 'sales tolerance does not widen the buyback range');
+    assert.equal(cell(outside, 'Otorisasi di Atas Nota'), source.databaseName === 'pusat' ? 'Ada otorisasi' : 'Tidak ditemukan');
+    if (source.databaseName === 'pusat') {
+      assert.equal(cell(outside, 'Deskripsi Otorisasi'),'PEMBELIAN DI ATAS NOTA');
+      assert.equal(cell(outside, 'Keterangan Otorisasi'),'outside: Disetujui supervisor');
+      assert.equal(cell(within, 'Otorisasi di Atas Nota'),'Ada otorisasi','all invoices recorded in the approval are matched');
+    }
     assert.match(cell(outside, 'Keterangan Pemeriksaan'), /12\.000/);
     assert.equal(cell(outside, 'Range acuan (IDR/gram)'), 'Rp1.757.000–Rp1.808.000');
     const missing = rows.find(row => cell(row, 'No. Faktur') === 'old-missing');
